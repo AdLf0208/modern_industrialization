@@ -1,0 +1,17 @@
+[package]
+# Ported from: Modern Industrialization 2.5.12 (AztechMC/Modern-Industrialization,
+# MIT), Minecraft Java 1.21.1 NeoForge. Local-only until the maintainer approves
+# publishing.
+name = "horizon-modern_industrialization"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "Modern Industrialization for Horizon: the electric macerator (slice 1)"
+
+[lib]
+# This exact source is also injected as a same-crate module by horizon-mixins.
+path = "mixins/modern_industrialization/runtime.rs"
+
+[workspace]
+resolver = "2"
