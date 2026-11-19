@@ -1,0 +1,40 @@
+{
+  "textures": {
+    "particle": "modern_industrialization:block/basic_machine_hull",
+    "casing": "modern_industrialization:block/basic_machine_hull",
+    "front": "modern_industrialization:block/machines/macerator/overlay_front",
+    "top": "modern_industrialization:block/machines/macerator/overlay_top"
+  },
+  "render_type": "minecraft:cutout",
+  "elements": [
+    {
+      "name": "casing",
+      "from": [0, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "north"},
+        "east": {"uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "east"},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "south"},
+        "west": {"uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "west"},
+        "up": {"uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "up"},
+        "down": {"uv": [0, 0, 16, 16], "texture": "#casing", "cullface": "down"}
+      }
+    },
+    {
+      "name": "front_overlay",
+      "from": [0, 0, -0.05],
+      "to": [16, 16, 0],
+      "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#front"}
+      }
+    },
+    {
+      "name": "top_overlay",
+      "from": [0, 16, 0],
+      "to": [16, 16.05, 16],
+      "faces": {
+        "up": {"uv": [0, 0, 16, 16], "texture": "#top"}
+      }
+    }
+  ]
+}
