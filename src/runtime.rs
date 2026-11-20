@@ -86,7 +86,7 @@ pub struct Output {
 
 /// One macerator recipe, as the mod's datapack holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Recipe {
+pub struct MaceratorRecipe {
     /// A stable id, saved in the block entity's compound.
     pub id: &'static str,
     /// EU a tick, before the tier's base rate and the overclock (`eu`).
@@ -99,7 +99,7 @@ pub struct Recipe {
     pub outputs: &'static [Output],
 }
 
-impl Recipe {
+impl MaceratorRecipe {
     /// The energy one run costs, `eu * duration`, overclock or not.
     pub fn total_eu(&self) -> i64 {
         i64::from(self.eu) * i64::from(self.duration)
@@ -193,7 +193,7 @@ pub struct Macerator {
 }
 
 /// The recipe with this id, if the table holds it.
-pub fn recipe(id: &str) -> Option<&'static Recipe> {
+pub fn recipe(id: &str) -> Option<&'static MaceratorRecipe> {
     RECIPES.iter().find(|recipe| recipe.id == id)
 }
 
@@ -207,7 +207,7 @@ pub fn recipe_max_eu(recipe_eu: i32, total_eu: i64, efficiency: i32) -> i64 {
 
 /// `CrafterComponent.getRecipeMaxEfficiencyTicks`: the overclock ticks at which
 /// a recipe reaches `min(maxEu, totalEu)`.
-pub fn max_efficiency_ticks(recipe: &Recipe) -> i32 {
+pub fn max_efficiency_ticks(recipe: &MaceratorRecipe) -> i32 {
     let total = recipe.total_eu();
     let target = total.min(i64::from(MAX_EU));
     if recipe_max_eu(recipe.eu, total, 0) >= target {
@@ -221,7 +221,7 @@ pub fn max_efficiency_ticks(recipe: &Recipe) -> i32 {
 
 /// Whether a run can start now: every input is in the slot and every certain
 /// output has room (`CrafterComponent.canStartRecipe`, without the locks).
-pub fn can_start(recipe: &Recipe, slots: &dyn Slots) -> bool {
+pub fn can_start(recipe: &MaceratorRecipe, slots: &dyn Slots) -> bool {
     let inputs = combined(recipe.inputs.iter().map(|input| (input.item, input.amount)));
     if inputs
         .iter()
@@ -255,7 +255,7 @@ fn combined<'a>(items: impl Iterator<Item = (&'a str, u32)>) -> Vec<(&'a str, u3
 }
 
 /// Takes the inputs of a run (`CrafterComponent.takeItemInputs`).
-fn take_inputs(recipe: &Recipe, slots: &mut dyn Slots) {
+fn take_inputs(recipe: &MaceratorRecipe, slots: &mut dyn Slots) {
     for input in recipe.inputs {
         slots.take(input.item, input.amount);
     }
@@ -263,7 +263,11 @@ fn take_inputs(recipe: &Recipe, slots: &mut dyn Slots) {
 
 /// Gives the outputs of a finished run, rolling each chance with `roll`
 /// (`CrafterComponent.putItemOutputs`). `roll` answers 0..[`PROBABILITY_SCALE`].
-pub fn apply_outputs(recipe: &Recipe, slots: &mut dyn Slots, roll: &mut dyn FnMut() -> u32) {
+pub fn apply_outputs(
+    recipe: &MaceratorRecipe,
+    slots: &mut dyn Slots,
+    roll: &mut dyn FnMut() -> u32,
+) {
     for output in recipe.outputs {
         if output.permille < PROBABILITY_SCALE && roll() >= output.permille {
             continue;
@@ -433,8 +437,8 @@ impl Macerator {
 /// vanilla items. A `#c:` tag input became one row per item the tag holds in
 /// this pack. The mod's other 290-odd macerator recipes need its own ingots,
 /// plates, gears, rods and wires, which this slice does not register.
-pub const RECIPES: &[Recipe] = &[
-    Recipe {
+pub const RECIPES: &[MaceratorRecipe] = &[
+    MaceratorRecipe {
         // vanilla_recipes/macerator/stone_to_cobblestone.json
         id: "modern_industrialization:stone_to_cobblestone",
         inputs: &[Input {
@@ -449,7 +453,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/gravel.json
         id: "modern_industrialization:cobblestone_to_gravel",
         inputs: &[Input {
@@ -464,7 +468,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/sand.json
         id: "modern_industrialization:gravel_to_sand",
         inputs: &[Input {
@@ -479,7 +483,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/sandstone_to_sand.json
         id: "modern_industrialization:sandstone_to_sand",
         inputs: &[Input {
@@ -494,7 +498,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/red_sandstone_to_sand.json
         id: "modern_industrialization:red_sandstone_to_red_sand",
         inputs: &[Input {
@@ -509,7 +513,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/cobbled_deepslate.json
         id: "modern_industrialization:deepslate_to_cobbled_deepslate",
         inputs: &[Input {
@@ -524,7 +528,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/glowstone_dust.json
         id: "modern_industrialization:glowstone_to_glowstone_dust",
         inputs: &[Input {
@@ -539,7 +543,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/bone_meal_from_block.json
         id: "modern_industrialization:bone_block_to_bone_meal",
         inputs: &[Input {
@@ -554,7 +558,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/bone_meal_from_bone.json
         id: "modern_industrialization:bone_to_bone_meal",
         inputs: &[Input {
@@ -569,7 +573,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/blaze_dust.json
         id: "modern_industrialization:blaze_rod_to_blaze_powder",
         inputs: &[Input {
@@ -584,7 +588,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/clay_ball.json
         id: "modern_industrialization:clay_to_clay_ball",
         inputs: &[Input {
@@ -599,7 +603,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/sugar.json
         id: "modern_industrialization:sugar_cane_to_sugar",
         inputs: &[Input {
@@ -614,7 +618,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/gilded_blackstone.json
         id: "modern_industrialization:gilded_blackstone_to_gold_nugget",
         inputs: &[Input {
@@ -629,7 +633,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // vanilla_recipes/macerator/netherite_scrap.json
         id: "modern_industrialization:ancient_debris_to_netherite_scrap",
         inputs: &[Input {
@@ -644,7 +648,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 800,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/macerator/brick_dust_from_block.json
         id: "modern_industrialization:bricks_to_brick_dust",
         inputs: &[Input {
@@ -659,7 +663,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 200,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/macerator/copper_ore_to_raw.json (tag c:ores/copper)
         id: "modern_industrialization:copper_ore_to_raw_copper",
         inputs: &[Input {
@@ -674,7 +678,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/macerator/copper_ore_to_raw.json (tag c:ores/copper)
         id: "modern_industrialization:copper_ore_to_raw_copper_from_deepslate_copper_ore",
         inputs: &[Input {
@@ -689,7 +693,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/coal/macerator/gem.json
         id: "modern_industrialization:coal_to_coal_dust",
         inputs: &[Input {
@@ -704,7 +708,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/brick/macerator/ingot.json
         id: "modern_industrialization:brick_to_brick_dust",
         inputs: &[Input {
@@ -719,7 +723,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/diamond/macerator/gem.json
         id: "modern_industrialization:diamond_to_diamond_dust",
         inputs: &[Input {
@@ -734,7 +738,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 800,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/emerald/macerator/gem.json
         id: "modern_industrialization:emerald_to_emerald_dust",
         inputs: &[Input {
@@ -749,7 +753,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 800,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/lapis/macerator/gem.json
         id: "modern_industrialization:lapis_lazuli_to_lapis_dust",
         inputs: &[Input {
@@ -764,7 +768,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/quartz/macerator/gem.json
         id: "modern_industrialization:quartz_to_quartz_dust",
         inputs: &[Input {
@@ -779,7 +783,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/iron/macerator/ingot.json (tag c:ingots/iron)
         id: "modern_industrialization:iron_ingot_to_iron_dust",
         inputs: &[Input {
@@ -794,7 +798,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 200,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/copper/macerator/ingot.json (tag c:ingots/copper)
         id: "modern_industrialization:copper_ingot_to_copper_dust",
         inputs: &[Input {
@@ -809,7 +813,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/gold/macerator/ingot.json (tag c:ingots/gold)
         id: "modern_industrialization:gold_ingot_to_gold_dust",
         inputs: &[Input {
@@ -824,7 +828,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/iron/macerator/raw_metal.json (tag c:raw_materials/iron)
         id: "modern_industrialization:raw_iron_to_iron_dust",
         inputs: &[Input {
@@ -846,7 +850,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/copper/macerator/raw_metal.json (tag c:raw_materials/copper)
         id: "modern_industrialization:raw_copper_to_copper_dust",
         inputs: &[Input {
@@ -868,7 +872,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 50,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/gold/macerator/raw_metal.json (tag c:raw_materials/gold)
         id: "modern_industrialization:raw_gold_to_gold_dust",
         inputs: &[Input {
@@ -890,7 +894,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 50,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/iron/macerator/ore_to_raw.json (tag c:ores/iron)
         id: "modern_industrialization:iron_ore_to_raw_iron",
         inputs: &[Input {
@@ -905,7 +909,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 200,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/iron/macerator/ore_to_raw.json (tag c:ores/iron)
         id: "modern_industrialization:iron_ore_to_raw_iron_from_deepslate_iron_ore",
         inputs: &[Input {
@@ -920,7 +924,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 200,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/gold/macerator/ore_to_raw.json (tag c:ores/gold)
         id: "modern_industrialization:gold_ore_to_raw_gold",
         inputs: &[Input {
@@ -935,7 +939,7 @@ pub const RECIPES: &[Recipe] = &[
         eu: 2,
         duration: 100,
     },
-    Recipe {
+    MaceratorRecipe {
         // materials/gold/macerator/ore_to_raw.json (tag c:ores/gold)
         id: "modern_industrialization:gold_ore_to_raw_gold_from_deepslate_gold_ore",
         inputs: &[Input {
@@ -1359,7 +1363,7 @@ mod tests {
 
     #[test]
     fn a_probability_output_is_rolled() {
-        let seed = Recipe {
+        let seed = MaceratorRecipe {
             id: "test:chanced",
             eu: 2,
             duration: 100,
