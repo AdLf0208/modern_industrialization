@@ -11,14 +11,15 @@ nightly `0b14f8acfd97fa2c750e42795249dcc981178ca4` / mixins
 | pure core | `cargo test --offline` | **27 passed; 0 failed** |
 | lints | `cargo clippy --offline --all-targets -- -D warnings` | exit 0, 0 warnings |
 | format | `rustfmt --edition 2024 --check src/*.rs` | clean |
-| package build | `cargo horizon-mod build` (twice, `rm -f Cargo.lock` before each) | byte-identical, `db21a20b…4873` |
-| package shape | `cargo horizon-mod check modern_industrialization.hmod` | exit 0, **46,651 B**, SHA-256 `db21a20b6c16790ac097831a9d936b803d2c69849b357f7aa2d2105031dc4873`, 59 entries, no packed `Cargo.lock` |
+| package build | `cargo horizon-mod build` (twice, `rm -f Cargo.lock` before each) | byte-identical, `e495ddae…8a14` |
+| package shape | `cargo horizon-mod check modern_industrialization.hmod` | exit 0, **46,145 B**, SHA-256 `e495ddae3a5d63d81555b209a85dd5e9617267566fa3015f35397da6922f8a14`, 59 entries, no packed `Cargo.lock` |
 | forward fit | `cargo horizon-mod fits modern_industrialization.hmod --build 0b14f8a` | `0b14f8a  made for` |
+| forward fit (a later build) | `cargo horizon-mod fits modern_industrialization.hmod --build f00125f` | `f00125f  fits` (the 2026-11-20 repair; `notes.md` §Registry fit-gate repair) |
 | package gate | `python3 ports/tools/verify-sdk-package.py modern_industrialization` | **1/1** |
-| in-game (modded) | `launcher-game.sh build modern_industrialization`, then `tools/e2e.sh` | **PASS** + `EXIT:0` (`evidence/modern_industrialization-e2e/e2e-launcher.log`) |
-| in-game (control) | the same command on `GAME=$CONTROL_GAME` | **FAIL** + `EXIT:1` (`e2e-launcher-control.log`) |
-| fail-capability | `SELFTEST=1` | **FAIL** + `EXIT:1` (`e2e-launcher-selftest.log`) |
-| log gate | `python3 ports/tools/check-e2e-logs.py modern_industrialization-e2e --strict` | 4 ok, 0 missing-exit, 0 bad-exit |
+| in-game (modded) | `launcher-game.sh run modern_industrialization` | **PASS** + `EXIT:0` (`evidence/modern_industrialization/e2e-default-0.2.0.log`) |
+| in-game (control) | the same command on `GAME=$CONTROL_GAME` | **FAIL** + `EXIT:1` (`e2e-control-nopackage.log`) |
+| fail-capability | `SELFTEST=1` | **FAIL** + `EXIT:1` (`e2e-selftest-0.2.0.log`) |
+| log gate | `python3 ports/tools/check-e2e-logs.py modern_industrialization --strict` | 6 ok, 0 missing-exit, 0 bad-exit |
 
 Every step ran through `ports/tools/build-slot.sh` (`--job sdk-mi`, `BUILD_LOCAL=1`: the second
 box has no SDK, no `wasm32-unknown-unknown` target and not the SDK toolchain). Logs:
