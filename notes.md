@@ -12,15 +12,18 @@ port is a clean-room Rust rewrite. What was read and the numbers extracted:
 **LOCAL-ONLY** until the maintainer approves publishing (ARCHITECTURE.md §8). MIT
 is licence rank 0 (permissive); the approval is still required.
 
-Status: **slices 1–3 implemented and verified in-game** — the electric macerator
+Status: **slices 1–4 implemented and verified in-game** — the electric macerator
 (a 32,000 FE buffer, one input, four outputs, the LV overclock, 33 jar recipes),
 the coke oven (a 3×3×3 brick shell with `formed`/`missing`, the jar's two coke
-recipes) and, at slice 3, the four bronze hatches (item and fluid, in and out) a
+recipes), at slice 3 the four bronze hatches (item and fluid, in and out) a
 shell position may hold, the controller's item pump through them, the
 `bronze_plated_bricks`/coil companions and the coke oven's mod-readable recipe
-kind. Everything else in the mod (the other 23 machine families, the blast
-furnace and the rest of the multiblocks, the energy hatches, the generators, the
-pipes, the 290-odd material recipes) is a planned gap (below).
+kind, and at slice 4 the **energy hatch family** (`lv`/`mv`/`hv`/`ev`/
+`superconductor` `_energy_input_hatch` and `_energy_output_hatch`, ten blocks)
+with the controller aggregating an input hatch's buffer into its own run.
+Everything else in the mod (the other 23 machine families, the blast furnace and
+the rest of the multiblocks, the cable tiers, the generators, the pipes, the
+290-odd material recipes) is a planned gap (below).
 
 > **Format (2026-11-18):** the port is now **one flat SDK `.hmod`** (mod API `0.2`, pin
 > `0b14f8a`). The record of that migration — file map, helper→hook table, gaps, traps and the
@@ -740,6 +743,257 @@ add-on reads by type, with `duration: 600` and the item ids in the files.
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
 
+## Slice 4 — the energy hatch family (2026-11-21)
+
+**Pin** `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins
+`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`. Package version **0.2.3**.
+
+**The gap it closes.** `notes.md` 6a's remaining line — *"What is left for
+`industrialization_overdrive`: the **energy hatch family** (`lv_energy_input_hatch` etc.) — its fifth
+hatch kind"* — which is also the add-on's own parent-surface row (`hatches (HatchTypes /
+HatchBlockEntity) in the parent`, `ports/_shared/evidence/industrialization_overdrive/
+parent-surface-matrix.log`). Class `content`, tier `deep`; shape `machines` (a block per hatch, its
+own FE buffer, the controller's aggregation), which is what `horizon/docs/modpacks.md` asks of a
+multiblock's inventory.
+
+### The numbers, read from tag 2.5.12 (`a02b76f4`)
+
+| Where | What it says |
+|---|---|
+| `MultiblockHatches.registerEnergyHatches(CableTier)` | one input and one output hatch per tier: `lv`, `mv`, `hv`, `ev`, `superconductor` → `<tier>_energy_{input,output}_hatch`, **ten blocks** |
+| `EnergyHatch`'s constructor | `new EnergyComponent(this, 30 * 20 * tier.getEu())` — the buffer is **600 × tier EU**, and `insertable`/`extractable` accept only that tier's own cable |
+| `CableTier` | `eu` = 32 (LV), 128 (MV), 1,024 (HV), 8,192 (EV), 128,000,000 (superconductor) |
+| `EnergyHatch.appendEnergyInputs/Outputs` | an input hatch hands its `EnergyComponent` to the multiblock; `AbstractElectricCraftingMultiblockBlockEntity.consumeEu` drains those components in order — the aggregation |
+| `MultiblockMachines.cokeOven` | its `HatchFlags` name `ITEM_INPUT`, `ITEM_OUTPUT`, `FLUID_INPUT`, `FLUID_OUTPUT` — **no** `ENERGY_INPUT` (it is a steam machine) |
+| the add-on's pyrolyse shell (`FINDINGS.md:52`) | its hatch positions are `…, ENERGY_INPUT` — the surface this slice exists for |
+| `HatchRecipesProvider` | each energy hatch's craft recipe is its tier's **cable** + its tier's **machine hull** (shaped), plus assembler/unpacker variants |
+
+At this mod's own 1 EU = 10 FE the five buffers are **192,000 / 768,000 / 6,144,000 / 49,152,000**
+FE, and the superconductor tier's 76,800,000,000 EU (768,000,000,000 FE) do not fit the pin's 32-bit
+FE buffer (`ModEnergyBuffer::capacity` is an `i32`), so it keeps `i32::MAX` FE (214,748,364 EU, 0.28 %
+of upstream's). That is the closest supported API with the difference stated, not a silent fake.
+
+### What was built
+
+| piece | where |
+|---|---|
+| `HatchTier` (five tiers, `prefix`/`eu`/`capacity_fe`/`from_prefix`) | `src/runtime.rs` |
+| `HatchKind::EnergyHatch { tier, input }`, `HatchKind::ENERGY` (10), `every()`, `is_energy`, `capacity_fe`, the block ids and the saved codes 4–13 | `src/runtime.rs` |
+| `COKE_OVEN_HATCHES` = the four jar kinds **+** the ten energy ones | `src/runtime.rs` |
+| `move_energy_count(from, to, to_capacity, max)` — the pump's pure arithmetic | `src/runtime.rs` |
+| ten block entity types + the `EnergyHatchPart`, ten `block_energy` declarations (tier capacity; input = fillable only, output = drainable only) | `src/lib.rs` |
+| `pump_energy`: the formed controller's input hatches fill its buffer, its output hatches drain it, through the saved `energy` key, in `level_tick_post` beside the item pump | `src/lib.rs` |
+| `/modern_industrialization info` learns an energy hatch (`{energy}/{capacity} FE`) and names the shell's hatch kinds (`hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, …]`); `shape` names its kinds too; `energy` fills a hatch and clamps at its tier | `src/lib.rs` |
+| the ten blocks' blockstates/models/items/`horizon` declarations/loot/lang, the jar's `hatch_energy/overlay_side`, `overlays/output_energy` and `quantum_machine_hull` textures, the tags and the creative tab | `assets/`, `data/` (written by `tools/gen_energy_hatches.py`, `--check` green) |
+
+**Hooks:** none added — the family is declarations (block entity types, `block_energy`) plus the
+existing `level_tick_post` pump. `cargo horizon-mod check` counts **358 API items** (was 352).
+
+### The red proof (verbatim)
+
+Two reds, in order. First the family's number, with only the expectation changed
+(`evidence/modern_industrialization/sdk-test-red-slice4-assert.log`, `cargo test --offline`):
+
+```
+---- runtime::tests::the_coke_ovens_hatch_flags_are_upstreams_two_end_layers stdout ----
+thread 'runtime::tests::the_coke_ovens_hatch_flags_are_upstreams_two_end_layers' panicked at src/runtime.rs:2498:9:
+assertion `left == right` failed
+  left: 4
+ right: 14
+test result: FAILED. 49 passed; 1 failed
+```
+
+Then the nine new tests with nothing implemented
+(`sdk-test-red-slice4.log`, exit 101, **36 previous errors**), e.g.:
+
+```
+error[E0433]: cannot find type `HatchTier` in this scope
+error[E0599]: no variant named `EnergyHatch` found for enum `runtime::HatchKind`
+error[E0599]: no method named `capacity_fe` found for enum `runtime::HatchKind`
+error: could not compile `modern_industrialization` (lib test) due to 36 previous errors
+```
+
+One test bug was fixed on the way (the id the test expected was `lv_input_hatch`, the jar's is
+`lv_energy_input_hatch` — `left: "modern_industrialization:lv_energy_input_hatch" right:
+"modern_industrialization:lv_input_hatch"`).
+
+### Green
+
+| step | evidence | result |
+|---|---|---|
+| tests | `sdk-test.log` | **59 passed**, 0 failed (50 + 9 new) |
+| lints | `sdk-clippy.log` | exit 0, **0 warnings** |
+| format | `sdk-fmt.log` | `cargo fmt --check` exit 0 |
+| build 1 + 2 | — (`rm -f Cargo.lock` before each) | **byte-identical** (`cmp`), no packed `Cargo.lock` |
+| package | `sdk-check.log` | **139,293 B**, SHA-256 `f665aa0bf7cb298fea4a2a730aaee4ae97837815a68ee2764a0d5264fa2c8691`, **192 entries**, `modern_industrialization 0.2.3 (native-mod, format native-1/0a875da…/e59da909…, for 26.3)` |
+| fits (the pin) | `sdk-fits.log` | `0a875da  made for`, exit 0 — sha256 `f665aa0b…` |
+| fits (another build) | `sdk-fits-next.log` | `0b14f8a  fits`, exit 0 — sha256 `f665aa0b…` |
+| gate | `verify-sdk-package.py` | **1/1** |
+| in game | `evidence/modern_industrialization-e2e/e2e-launcher-slice4.log` | **PASS** + `EXIT:0` |
+| control | `e2e-launcher-slice4-control.log` | **FAIL** + `EXIT:1` (`expected …electric_macerator at 0,100,0, got 'minecraft:air'`) |
+| fail-capability (slice 2's) | `e2e-launcher-slice4-selftest.log` | **FAIL** + `EXIT:1` (`SELFTEST flipped: the unformed oven ran nothing and burned nothing, as it should`) |
+| fail-capability (this slice's) | `e2e-launcher-slice4-negative.log` | **FAIL** + `EXIT:1` (`NEGATIVE flipped: the 11,980 FE run made no coke, as it should not`) |
+| log gate | `check-e2e-logs.py modern_industrialization-e2e --strict` | logs=10 ok=10, 0 missing-exit, 0 bad-exit |
+
+The launcher rebuilt the game for this version (`Compiling modern_industrialization (1 of 1)`,
+`native-0a875da-463a09e88e81`); all four legs ran against that export. The first in-game run failed
+in the new leg T on a harness bug (`shape_at` called with one quoted argument, `$2: unbound
+variable`) — that run is kept as `e2e-launcher-slice4-red.log` (`FAIL` + `EXIT:1`); the fix is one
+word in `tools/e2e.sh` and nothing in `src/`.
+
+### The in-game leg (quoted from `e2e-launcher-slice4.log`)
+
+Legs P–T; the second coke oven's controller at `14,101,0`, its item input hatch at `13,100,0`, its
+item output hatch at `15,102,2` and its LV energy input hatch at `15,100,0` (offset `[1,-1,0]`,
+the floor).
+
+```
+== P: the energy hatch family — five tiers with their own caps ==
+  block(0,100,8) = modern_industrialization:lv_energy_input_hatch
+  modern_industrialization:lv_energy_input_hatch at 0,100,8: 0/192000 FE (0 EU), t=4832
+  set_energy(0,100,8) = 192000 FE
+  modern_industrialization:lv_energy_input_hatch at 0,100,8: 192000/192000 FE (19200 EU), t=4845
+  block(0,101,8) = modern_industrialization:mv_energy_input_hatch
+  modern_industrialization:mv_energy_input_hatch at 0,101,8: 0/768000 FE (0 EU), t=4860
+  set_energy(0,101,8) = 768000 FE
+  modern_industrialization:mv_energy_input_hatch at 0,101,8: 768000/768000 FE (76800 EU), t=4873
+  block(0,102,8) = modern_industrialization:hv_energy_input_hatch
+  modern_industrialization:hv_energy_input_hatch at 0,102,8: 0/6144000 FE (0 EU), t=4888
+  set_energy(0,102,8) = 6144000 FE
+  modern_industrialization:hv_energy_input_hatch at 0,102,8: 6144000/6144000 FE (614400 EU), t=4901
+  block(0,103,8) = modern_industrialization:ev_energy_input_hatch
+  modern_industrialization:ev_energy_input_hatch at 0,103,8: 0/49152000 FE (0 EU), t=4918
+  set_energy(0,103,8) = 49152000 FE
+  modern_industrialization:ev_energy_input_hatch at 0,103,8: 49152000/49152000 FE (4915200 EU), t=4931
+  block(0,104,8) = modern_industrialization:superconductor_energy_input_hatch
+  modern_industrialization:superconductor_energy_input_hatch at 0,104,8: 0/2147483647 FE (0 EU), t=4948
+  set_energy(0,104,8) = 2147483647 FE
+  modern_industrialization:superconductor_energy_input_hatch at 0,104,8: 2147483647/2147483647 FE (214748364 EU), t=4969
+  an output hatch has the same tier cap
+  block(4,104,8) = modern_industrialization:lv_energy_output_hatch
+  modern_industrialization:lv_energy_output_hatch at 4,104,8: 0/192000 FE (0 EU), t=4991
+== P2: an LV energy input hatch holds a shell position, and the readout names it ==
+  block(14,101,0) = modern_industrialization:coke_oven
+  shell(14,101,0) = 22 bricks + 3 hatches
+  oven(14,101,0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5040
+  oven(14 101 0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5048
+  a middle-ring position still refuses one (the jar gives it no hatch flags)
+  block(15,101,0) = modern_industrialization:hv_energy_input_hatch
+  oven(14,101,0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed false, missing 1, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5070
+  block(15,101,0) = minecraft:bricks
+  oven(14,101,0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5093
+== Q: exactly what goes into the hatch arrives in the controller's buffer ==
+  set_energy(14,101,0) = 0 FE
+  set_energy(15,100,0) = 5000 FE
+  oven(14,101,0): modern_industrialization:coke_oven at 14,101,0: 5000/32000 FE (500 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5127
+  info(14,101,0): modern_industrialization:coke_oven at 14,101,0: 5000/32000 FE (500 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5135
+  modern_industrialization:lv_energy_input_hatch at 15,100,0: 0/192000 FE (0 EU), t=5143
+== R: 12,000 FE from the hatch pays for one coke run; 11,980 FE does not ==
+  set_energy(14,101,0) = 0 FE
+  set_energy(15,100,0) = 12000 FE
+  modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5804
+  has(15,102,2) modern_industrialization:coke x1: ok
+  has(14,101,0) modern_industrialization:coke x0: ok
+  modern_industrialization:lv_energy_input_hatch at 15,100,0: 0/192000 FE (0 EU), t=5816
+  the last 20 FE are what finish it: an 11,980 FE fill stalls 2 EU short
+  block(15,102,2) = modern_industrialization:bronze_item_output_hatch
+  oven(14,101,0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=5846
+  set_energy(14,101,0) = 0 FE
+  set_energy(15,100,0) = 11980 FE
+  modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 998/1000, 20 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active modern_industrialization:coke_oven_coal_to_coke, t=6508
+  has(15,102,2) modern_industrialization:coke x0: ok
+  has(13,100,0) minecraft:coal x0: ok
+  20 more FE finish the same run
+  set_energy(15,100,0) = 20 FE
+  modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_input_hatch, bronze_item_output_hatch], active none, t=6556
+  has(15,102,2) modern_industrialization:coke x1: ok
+== S: an energy OUTPUT hatch drains the controller's buffer ==
+  block(15,100,0) = modern_industrialization:lv_energy_output_hatch
+  oven(14,101,0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_output_hatch, bronze_item_output_hatch], active none, t=6594
+  oven(14 101 0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_output_hatch, bronze_item_output_hatch], active none, t=6602
+  set_energy(14,101,0) = 1000 FE
+  modern_industrialization:lv_energy_output_hatch at 15,100,0: 1000/192000 FE (100 EU), t=6626
+  info(14,101,0): modern_industrialization:coke_oven at 14,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3 [bronze_item_input_hatch, lv_energy_output_hatch, bronze_item_output_hatch], active none, t=6635
+== T: the add-on's 3x3x4 shell takes an energy hatch, named by its readout ==
+  block(19,104,0) = modern_industrialization:hv_energy_input_hatch
+  shape(20 101 0): pyrolyse shape at 20,101,0: formed true, missing 0, hatches 2 [hv_energy_input_hatch, bronze_fluid_input_hatch] (33 members), t=6657
+  the control refuses a hatch that holds no buffer
+  energy(7,100,0) refused, as it should be
+PASS: …
+EXIT:0
+```
+
+What the numbers prove: each tier's buffer is its own (192,000 / 768,000 / 6,144,000 / 49,152,000 /
+`i32::MAX` FE) and an **over-fill clamps** to it; an LV energy hatch holds a floor position
+(`formed true, missing 0, hatches 3`, the readout naming it) while the same hatch in the middle ring
+is `missing 1`; exactly the **5,000 FE** put into the hatch is what the controller's own buffer then
+holds (and the hatch is empty); a **12,000 FE** fill runs a whole 600-tick coke recipe that leaves the
+controller, the hatch and the run at 0 with one coke in the output hatch, while **11,980 FE** stalls
+the same run at 998‰, 2 EU short, with no coke and the coal already consumed — the **last 20 FE**
+finish it; an *output* hatch takes the controller's 1,000 FE into itself; the add-on's 3×3×4 shell
+forms with an HV energy hatch in a hatch position and its readout names it; and the control refuses
+a bronze hatch, which holds no buffer.
+
+### Coverage (every family this slice ships)
+
+| family | state |
+|---|---|
+| the ten energy hatch blocks (`lv`…`superconductor`, in and out) | **tested** — P: each placed and read back by id, its capacity in `info`; the unit tests pin the ids, the codes 4–13 and the ten-block table |
+| each tier's buffer and its clamp | **tested** — P: an over-fill of 2× the cap lands at the cap for LV/MV/HV/EV; the superconductor tier's `i32::MAX` FE is exact (nothing larger fits the control's integer argument) |
+| an energy hatch as a shell member | **tested** — P2: `formed true, missing 0, hatches 3` with the LV input hatch named; the middle ring `missing 1`; the unit tests pin `allows` for all ten and the recorded kind |
+| the controller aggregating an input hatch's energy | **tested** — Q (exactly 5,000 FE in the buffer, hatch empty), R (12,000 FE pays a whole run) |
+| the run drawing its 20 FE/t from the hatch, not from nowhere | **tested** — R's differential: 12,000 FE completes, 11,980 FE stalls at 998‰ with no coke, +20 FE completes; `NEGATIVE=1` inverts the stall and fails |
+| an energy output hatch | **tested** — S: the controller's 1,000 FE ends up in the hatch; the declaration is extract-only |
+| the add-on's 3×3×4 shell with an energy hatch | **tested** — T: `formed true, hatches 2 [hv_energy_input_hatch, bronze_fluid_input_hatch]` |
+| the readouts naming the hatch kinds | **tested** — P2/S name theirs in `info`; T in `shape`; G still reads the recipe kind back |
+| the hatches' shrug-off of a non-hatch control | **tested** — T: `/energy` on a bronze item hatch is refused |
+| the energy hatches' **craft recipes** (tier cable + tier machine hull) | **not ported** — neither the cables nor the machine hulls are registered in this slice, so the recipe's ingredients do not exist; the blocks are obtainable from the creative tab, as every other block of this port |
+| the cable tiers as blocks/items and the cable network | **not ported** — the tier table is carried as the hatch's buffer only; MI's `CableTier` gating (a hatch takes only its own tier's cable) is unenforced, see deviations |
+| a fluid hatch with a mod fluid, the creosote output | **not ported** — unchanged from slice 2 (the tank gap, notes 6c) |
+| the steel/advanced/turbo/highly-advanced item and fluid hatch tiers | **not ported** — slice 3's bronze four only; the energy family is the tiered family this slice adds |
+| the nuclear and large-tank hatches | **not ported** — they belong to the nuclear/reactor chain, not to this slice |
+
+### Deviations this slice introduces
+
+1. **The coke oven's shell accepts an energy hatch, which upstream's does not.** `cokeOvenHatches`
+   in the jar names only the four item/fluid kinds: a position taking `ENERGY_INPUT` belongs to an
+   *electric* multiblock, and this port has none yet. The energy family's aggregation is proven on
+   the one controller the port owns, so a player can build a coke oven with an energy hatch where
+   upstream would refuse the shape. Every other behaviour of the hatch is upstream's.
+2. **The aggregation is a pump into the controller's buffer**, not upstream's shared
+   `EnergyComponent` list: upstream's crafter drains the hatches directly, this port moves the same
+   energy into its own buffer once a tick (a hatch → buffer move takes one tick), limited by the
+   buffer's 32,000 FE. Energy is conserved either way and the run's cost is unchanged.
+3. **A hatch is filled/drained by the harness control too** (`/energy`), and its buffer is clamped to
+   its tier's capacity there — a control, not gameplay, as `energy`/`efficiency` always were.
+4. **The superconductor tier is clamped to `i32::MAX` FE** (0.28 % of upstream's 76,800,000,000 EU)
+   because the pin's `ModEnergyBuffer::capacity` is an `i32`. The tier keeps its own block and its
+   own (largest possible) buffer, so a shell and a cable see the same block as upstream's.
+5. **No cable-tier gating on insert/extract**: upstream's hatch accepts only its own tier's cable
+   (`tier2 == tier`), and this port has no cable tiers, so any energy source may fill an input hatch
+   and any drain may empty an output hatch.
+6. **No auto-output and no facing** on an energy hatch (upstream's `tickTransfer` pushes an output
+   hatch's energy out by its orientation): the port has no orientation state (slice 1's gap), so an
+   output hatch's buffer is what a cable or the pump reaches.
+
+### Pin findings for the next slice
+
+- **`merge_data` is the way one block entity writes another's energy.** There is no
+  `BlockEntityRef::set_energy`; the `block_energy` capability's store is the int `energy` key, so the
+  pump reads both compounds and merges `{"energy": Int}` into each. It works inside
+  `transaction_open()`/`transaction_close(&seal, true)` — the commit keeps both writes.
+- **`Registrar::block_energy`'s limits are what encode direction**: `max_insert`/`max_extract` plus
+  `insert_faces`/`extract_faces` decide whether the world may fill or drain a block, which is
+  exactly upstream's `insertable`/`extractable` split with no API gap.
+- **A new family can be entirely declarations + one existing hook**: the ten hatches needed no new
+  hook (`level_tick_post` pumps, `block_energy` declares), and the API-item count moved 352 → 358.
+- **`uses.json` records `method:EnergyHandler::*` and `capability:horizon:energy` for a name-shaped
+  harvest** (this source never names `EnergyHandler`): the scan resolves identifiers, so a `capacity`
+  or `insert` in the source can appear as the SDK's method. Harmless here — `fits --build 0b14f8a`
+  is green — but a renamed local type is still the first thing to check when `fits` goes red.
+
+Skills: superpowers/using-superpowers,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices
+
 ## Next slices (in dependency order)
 
 1. **The steam pair** (`bronze_macerator`, `bronze_furnace`) on the same tick: a
@@ -763,10 +1017,15 @@ Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-de
        `bronze_fluid_input_hatch`, `bronze_fluid_output_hatch`): a block per hatch type, its own
        one-slot container/tank, the controller aggregating them.~~ **Done (slice 3):** the four
        bronze hatches, the per-position `HatchFlags`, the item pump through the shell, the
-       `bronze_plated_bricks`/coil companions and the readable coke recipe kind are in. What is
-       left for `industrialization_overdrive`: the **energy hatch family**
-       (`lv_energy_input_hatch` etc.) — its fifth hatch kind — and its own controller, which is the
-       add-on's slice.
+       `bronze_plated_bricks`/coil companions and the readable coke recipe kind are in.
+       ~~**The energy hatch family** (`lv_energy_input_hatch` etc.) — the add-on's fifth hatch
+       kind.~~ **Done (slice 4):** the ten energy hatches (five cable tiers, in and out), their
+       tier buffers, the shell accepting them where a hatch may go and the controller aggregating
+       an input hatch's energy into its run. What is left for `industrialization_overdrive`: its
+       own **controller** (a `deep` block with its own 3×3×4 shape, which the port's own matcher
+       already proves), its **pyrolyse oven recipe type** (the SDK has no data-driven machine recipe
+       type yet, notes §Migration gap 1 — its recipes proxy the coke oven kind, which slice 3
+       registered) and **creosote** (6c).
    6b. **The steam blast furnace** (`steam_blast_furnace`, the mod's own `fire_clay_bricks`
        over 3×3×4) on the same machinery, plus `fire_clay_bricks` and its recipe.
    6c. **A fluid tank for a mod's own fluid** (`modern_industrialization:steam`, `creosote`) —

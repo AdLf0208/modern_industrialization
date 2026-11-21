@@ -44,10 +44,23 @@
 #     bricks + 16 coil positions (two holding a hatch) around a controller form, one
 #     coil broken is `missing 1`, and a brick where a coil belongs is still unformed;
 #  I..O the macerator: the 32,000 FE buffer, the four outputs, the LV overclock, and a
-#     half-finished run surviving save + quit + relaunch.
+#     half-finished run surviving save + quit + relaunch;
+#  P..T the energy hatch family (slice 4): the five cable tiers with their own caps
+#     (LV 192,000 / MV 768,000 / HV 6,144,000 / EV 49,152,000 / SV i32::MAX FE, each
+#     clamping an over-fill), an LV energy input hatch holding a shell position
+#     (`formed true, missing 0, hatches 3`, named by the readout) while a middle-ring
+#     position still refuses one; exactly the 5,000 FE put into the hatch arriving in
+#     the controller's buffer; a whole 600-tick coke run paying exactly 12,000 FE out
+#     of the hatch and an 11,980 FE fill stalling 2 EU short (then 20 more FE finish
+#     it); an LV energy output hatch draining the controller's buffer (1,000 FE); the
+#     add-on's 3x3x4 shell taking an HV energy hatch, named by its readout; and the
+#     control refusing a bronze hatch, which holds no buffer.
 #
 # SELFTEST=1 runs only the coke oven legs A/B with the unformed assertion inverted (B
 # must FAIL), so the fail-capability is the multiblock's, not the machine's.
+# NEGATIVE=1 runs only the energy hatch leg R with the 11,980 FE assertion inverted
+# (the stalled run must be seen to have made its coke), so this slice's counterfactual
+# is its own run.
 set -Eeuo pipefail
 export LC_ALL=C
 [ -z "${MI_DEBUG:-}" ] || set -x
@@ -63,6 +76,7 @@ RES=${RES:-${HORIZON_RES:-/home/adlf/Desktop/horizon/.local/horizon-client/26.3}
 E2E_TMP=${E2E_TMP:-/tmp/opencode}
 SOCK=${SOCK:-$E2E_TMP/modern_industrialization-e2e.sock}
 SELFTEST=${SELFTEST:-0}
+NEGATIVE=${NEGATIVE:-0}
 KEEP=${KEEP:-0}
 WORLD=ModernIndustrializationE2E
 
@@ -90,6 +104,14 @@ HATCH_OUT="9 102 2"         # item output hatch, offset [1,1,2]
 HATCH_FLUID="8 100 0"       # fluid input hatch, offset [0,-1,0]
 # The matcher's 3x3x4 harness shape (the add-on's pyrolyse shell), at 20,101,0.
 SHAPE_AT="20 101 0"
+# The second coke oven (slice 4): its floor holds the LV energy input hatch, so the
+# energy that runs it comes from a hatch and not from the controller's own buffer.
+ECO_AT="14 101 0"
+E_ITEM_IN="13 100 0"        # bronze item input hatch, offset [-1,-1,0]
+E_ITEM_OUT="15 102 2"       # bronze item output hatch, offset [1,1,2]
+E_HATCH_IN="15 100 0"       # lv energy input hatch, offset [1,-1,0]
+# The energy family's numbers (`EnergyHatch`: 30 * 20 * tier.eu EU, 1 EU = 10 FE).
+E_SV_CAP=2147483647         # 768,000,000,000 FE clamped to the 32-bit buffer
 
 [ -x "$CTL" ] || { echo "missing horizon-ctl: $CTL" >&2; exit 1; }
 [ -n "$GAME" ] || {
@@ -221,19 +243,38 @@ info() { # info X Y Z
     echo "NO-INFO $(jq -c '{chat,action_bar}' <<<"$out")"
 }
 
-# set_energy X Y Z AMOUNT: the harness control `/modern_industrialization energy`.
-set_energy() { # X Y Z AMOUNT
-    local want=$4 out
+# set_energy X Y Z AMOUNT [EXPECTED_REPLY]: the harness control
+# `/modern_industrialization energy`. A buffer clamps what it cannot hold, so the
+# reply names the amount that landed (an energy hatch clamps at its own tier's
+# capacity); EXPECTED_REPLY is what the control must answer.
+set_energy() { # X Y Z AMOUNT [EXPECTED_REPLY]
+    local want=$4 expect=${5:-$4} out
     say "modern_industrialization energy $want $1 $2 $3"
     for _ in $(seq 1 20); do
         ctl wait 2 >/dev/null
         out=$(ctl messages 20 | jq -r '.chat[]' || true)
-        if grep -q "Energy set to $want FE." <<<"$out"; then
-            echo "  set_energy($1,$2,$3) = $want FE"
+        if grep -q "Energy set to $expect FE." <<<"$out"; then
+            echo "  set_energy($1,$2,$3) = $expect FE"
             return
         fi
     done
-    fail "could not set $1,$2,$3 to $want FE"
+    fail "could not set $1,$2,$3 to $want FE (expected the reply '$expect')"
+}
+
+# expect_energy_refused X Y Z: the control refuses a block entity that is not a
+# machine of this port (a bronze item hatch holds no buffer).
+expect_energy_refused() { # X Y Z
+    local out
+    say "modern_industrialization energy 100 $1 $2 $3"
+    for _ in $(seq 1 20); do
+        ctl wait 2 >/dev/null
+        out=$(ctl messages 20 | jq -r '.chat[]' || true)
+        if grep -q "not one of this port's machines; nothing was changed" <<<"$out"; then
+            echo "  energy($1,$2,$3) refused, as it should be"
+            return
+        fi
+    done
+    fail "the energy control did not refuse $1,$2,$3: $(ctl messages 10 | jq -c .chat)"
 }
 
 # set_efficiency X Y Z TICKS: the harness control that warms the macerator.
@@ -252,6 +293,7 @@ set_efficiency() { # X Y Z TICKS
 }
 
 energy_of() { sed -nE 's/.* at [-0-9]+,[-0-9]+,[-0-9]+: ([0-9]+)\/[0-9]+ FE.*/\1/p' <<<"$1"; }
+capacity_of() { sed -nE 's/.* at [-0-9]+,[-0-9]+,[-0-9]+: [0-9]+\/([0-9]+) FE.*/\1/p' <<<"$1"; }
 progress_of() { sed -nE 's/.*progress ([0-9]+)\/1000.*/\1/p' <<<"$1"; }
 rate_of() { sed -nE 's/.*, ([0-9]+) FE\/t,.*/\1/p' <<<"$1"; }
 efficiency_of() { sed -nE 's/.*efficiency ([0-9]+)\/[0-9]+.*/\1/p' <<<"$1"; }
@@ -292,11 +334,15 @@ expect_oven() { # X Y Z FORMED(true|false) MISSING [HATCHES]
     fi
 }
 
-# build_shell X Y Z: upstream's coke oven shape around a controller at X,Y,Z — 25
-# members (skipping the controller and the hollow interior (0,0,1)): 22 bricks and
-# the three bronze hatches at the positions this script names.
-build_shell() { # X Y Z
+# build_shell X Y Z [ITEM_IN ID ITEM_OUT ID ENERGY_IN ID]: upstream's coke oven
+# shape around a controller at X,Y,Z — 25 members (skipping the controller and the
+# hollow interior (0,0,1)): 22 bricks and three hatches at the positions given, by
+# default the three bronze hatches this script names below.
+build_shell() { # X Y Z [P1 ID1 P2 ID2 P3 ID3]
     local x=$1 y=$2 z=$3 built=0 hatches=0 dx dy dz id px py pz
+    local p1=${4:-$HATCH_IN} i1=${5:-modern_industrialization:bronze_item_input_hatch}
+    local p2=${6:-$HATCH_OUT} i2=${7:-modern_industrialization:bronze_item_output_hatch}
+    local p3=${8:-$HATCH_FLUID} i3=${9:-modern_industrialization:bronze_fluid_input_hatch}
     for dy in -1 0 1; do
         for dx in -1 0 1; do
             for dz in 0 1 2; do
@@ -305,12 +351,12 @@ build_shell() { # X Y Z
                 fi
                 px=$((x + dx)); py=$((y + dy)); pz=$((z + dz))
                 id=minecraft:bricks
-                if [ "$px $py $pz" = "$HATCH_IN" ]; then
-                    id=modern_industrialization:bronze_item_input_hatch; hatches=$((hatches + 1))
-                elif [ "$px $py $pz" = "$HATCH_OUT" ]; then
-                    id=modern_industrialization:bronze_item_output_hatch; hatches=$((hatches + 1))
-                elif [ "$px $py $pz" = "$HATCH_FLUID" ]; then
-                    id=modern_industrialization:bronze_fluid_input_hatch; hatches=$((hatches + 1))
+                if [ "$px $py $pz" = "$p1" ]; then
+                    id=$i1; hatches=$((hatches + 1))
+                elif [ "$px $py $pz" = "$p2" ]; then
+                    id=$i2; hatches=$((hatches + 1))
+                elif [ "$px $py $pz" = "$p3" ]; then
+                    id=$i3; hatches=$((hatches + 1))
                 fi
                 ctl command "setblock $px $py $pz $id" >/dev/null
                 built=$((built + 1))
@@ -603,6 +649,170 @@ shape_legs() {
 }
 
 # ---------------------------------------------------------------------------
+# The energy hatch family (slice 4)
+# ---------------------------------------------------------------------------
+
+# empty_block X Y Z ID: a block's contents go with the block, and the whole shell
+# still standing re-forms the oven on the placement.
+empty_block() { # X Y Z ID
+    ctl command "setblock $1 $2 $3 minecraft:air" >/dev/null
+    ctl wait 4
+    place "$1" "$2" "$3" "$4"
+    ctl wait 6
+}
+
+energy_legs() {
+    local line i tier id want sx sy sz
+
+    echo "== P: the energy hatch family — five tiers with their own caps =="
+    # `EnergyHatch`'s buffer is `30 * 20 * tier.eu` EU; at this mod's 1 EU = 10 FE
+    # that is 6,000 FE per tier EU: LV 192,000, MV 768,000, HV 6,144,000, EV
+    # 49,152,000, and the superconductor tier's 768,000,000,000 FE past the pin's
+    # 32-bit buffer (i32::MAX FE stands in, `notes.md`).
+    i=0
+    for spec in "lv 192000" "mv 768000" "hv 6144000" "ev 49152000"; do
+        set -- $spec; tier=$1; want=$2
+        id=modern_industrialization:${tier}_energy_input_hatch
+        place 0 $((100 + i)) 8 "$id"
+        line=$(info 0 $((100 + i)) 8)
+        echo "  $line"
+        [ "$(capacity_of "$line")" = "$want" ] \
+            || fail "the $tier hatch's capacity is not $want FE: $line"
+        [ "$(energy_of "$line")" = 0 ] || fail "a fresh $tier hatch is not empty: $line"
+        # Over-fill it: the tier's own cap is what lands, not the amount asked for.
+        set_energy 0 $((100 + i)) 8 $((want * 2)) "$want"
+        line=$(info 0 $((100 + i)) 8)
+        echo "  $line"
+        [ "$(energy_of "$line")" = "$want" ] \
+            || fail "the $tier hatch did not clamp at $want FE: $line"
+        i=$((i + 1))
+    done
+    place 0 104 8 modern_industrialization:superconductor_energy_input_hatch
+    line=$(info 0 104 8)
+    echo "  $line"
+    [ "$(capacity_of "$line")" = "$E_SV_CAP" ] \
+        || fail "the superconductor hatch's capacity is not i32::MAX FE: $line"
+    # i32::MAX FE is the largest the pin's buffer holds, so this fill is exact
+    # rather than clamped: nothing larger fits the control's own integer argument.
+    set_energy 0 104 8 "$E_SV_CAP" "$E_SV_CAP"
+    line=$(info 0 104 8)
+    echo "  $line"
+    [ "$(energy_of "$line")" = "$E_SV_CAP" ] \
+        || fail "the superconductor hatch did not take i32::MAX FE: $line"
+    echo "  an output hatch has the same tier cap"
+    place 4 104 8 modern_industrialization:lv_energy_output_hatch
+    line=$(info 4 104 8)
+    echo "  $line"
+    [ "$(capacity_of "$line")" = 192000 ] \
+        || fail "the LV output hatch's capacity is not 192,000 FE: $line"
+
+    echo "== P2: an LV energy input hatch holds a shell position, and the readout names it =="
+    place $ECO_AT modern_industrialization:coke_oven
+    build_shell $ECO_AT \
+        "$E_ITEM_IN" modern_industrialization:bronze_item_input_hatch \
+        "$E_ITEM_OUT" modern_industrialization:bronze_item_output_hatch \
+        "$E_HATCH_IN" modern_industrialization:lv_energy_input_hatch
+    expect_oven $ECO_AT true 0 3
+    line=$(info $ECO_AT)
+    echo "  oven($ECO_AT): $line"
+    grep -q "lv_energy_input_hatch" <<<"$line" \
+        || fail "the shell readout does not name the energy hatch: $line"
+    echo "  a middle-ring position still refuses one (the jar gives it no hatch flags)"
+    place 15 101 0 modern_industrialization:hv_energy_input_hatch
+    ctl wait 6
+    expect_oven $ECO_AT false 1 3
+    place 15 101 0 minecraft:bricks
+    ctl wait 6
+    expect_oven $ECO_AT true 0 3
+
+    echo "== Q: exactly what goes into the hatch arrives in the controller's buffer =="
+    set_energy $ECO_AT 0
+    ctl wait 4
+    set_energy $E_HATCH_IN 5000
+    ctl wait 10
+    expect_oven $ECO_AT true 0 3
+    expect_info $ECO_AT energy 5000
+    line=$(info $E_HATCH_IN)
+    echo "  $line"
+    [ "$(energy_of "$line")" = 0 ] || fail "the hatch kept what the controller took: $line"
+
+    echo "== R: 12,000 FE from the hatch pays for one coke run; 11,980 FE does not =="
+    set_energy $ECO_AT 0
+    set_energy $E_HATCH_IN 12000
+    ctl container $E_ITEM_IN minecraft:coal 1 >/dev/null
+    ctl wait 640
+    line=$(info $ECO_AT)
+    echo "  $line"
+    [ "$(energy_of "$line")" = 0 ] || fail "the coke run did not spend the hatch's 12,000 FE: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "the coke run did not finish: $line"
+    [ "$(active_of "$line")" = none ] || fail "the coke run did not end: $line"
+    has $E_ITEM_OUT modern_industrialization:coke 1
+    has $ECO_AT modern_industrialization:coke 0
+    line=$(info $E_HATCH_IN)
+    echo "  $line"
+    [ "$(energy_of "$line")" = 0 ] || fail "the hatch still holds energy after the run: $line"
+
+    echo "  the last 20 FE are what finish it: an 11,980 FE fill stalls 2 EU short"
+    empty_block $E_ITEM_OUT modern_industrialization:bronze_item_output_hatch
+    expect_oven $ECO_AT true 0 3
+    set_energy $ECO_AT 0
+    set_energy $E_HATCH_IN 11980
+    ctl container $E_ITEM_IN minecraft:coal 1 >/dev/null
+    ctl wait 640
+    line=$(info $ECO_AT)
+    echo "  $line"
+    if [ "$NEGATIVE" = 1 ]; then
+        echo "  NEGATIVE: expecting the 11,980 FE run to have made its coke (this must fail)"
+        if [ "$(energy_of "$line")" = 0 ] && [ "$(progress_of "$line")" = 998 ]; then
+            fail "NEGATIVE flipped: the 11,980 FE run made no coke, as it should not"
+        fi
+    fi
+    [ "$(energy_of "$line")" = 0 ] || fail "the short run left energy in the controller: $line"
+    [ "$(progress_of "$line")" = 998 ] || fail "the short run is not 2 EU from its end: $line"
+    [ "$(active_of "$line")" = modern_industrialization:coke_oven_coal_to_coke ] \
+        || fail "the short run is not stalled on its recipe: $line"
+    has $E_ITEM_OUT modern_industrialization:coke 0
+    has $E_ITEM_IN minecraft:coal 0
+    echo "  20 more FE finish the same run"
+    set_energy $E_HATCH_IN 20
+    ctl wait 20
+    line=$(info $ECO_AT)
+    echo "  $line"
+    [ "$(energy_of "$line")" = 0 ] || fail "the finished run left energy behind: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "the stalled run did not finish: $line"
+    has $E_ITEM_OUT modern_industrialization:coke 1
+
+    echo "== S: an energy OUTPUT hatch drains the controller's buffer =="
+    empty_block $E_HATCH_IN modern_industrialization:lv_energy_output_hatch
+    ctl wait 6
+    expect_oven $ECO_AT true 0 3
+    line=$(info $ECO_AT)
+    echo "  oven($ECO_AT): $line"
+    grep -q "lv_energy_output_hatch" <<<"$line" \
+        || fail "the shell readout does not name the output hatch: $line"
+    set_energy $ECO_AT 1000
+    ctl wait 10
+    line=$(info $E_HATCH_IN)
+    echo "  $line"
+    [ "$(energy_of "$line")" = 1000 ] \
+        || fail "the output hatch did not take the controller's buffer: $line"
+    expect_info $ECO_AT energy 0
+
+    echo "== T: the add-on's 3x3x4 shell takes an energy hatch, named by its readout =="
+    read -r sx sy sz <<<"$SHAPE_AT"
+    place $((sx - 1)) $((sy + 3)) $sz modern_industrialization:hv_energy_input_hatch
+    ctl wait 6
+    line=$(shape_at $SHAPE_AT)
+    echo "  shape($SHAPE_AT): $line"
+    [ "$(formed_of "$line")" = true ] \
+        || fail "the 3x3x4 shell with an energy hatch does not form: $line"
+    grep -q "hv_energy_input_hatch" <<<"$line" \
+        || fail "the shape readout does not name the energy hatch: $line"
+    echo "  the control refuses a hatch that holds no buffer"
+    expect_energy_refused $HATCH_IN
+}
+
+# ---------------------------------------------------------------------------
 # The electric macerator (slice 1, the regression)
 # ---------------------------------------------------------------------------
 
@@ -727,17 +937,26 @@ arena
 
 if [ "$SELFTEST" = 1 ]; then
     echo "== SELFTEST: the macerator legs are skipped; the coke oven's unformed assertion runs inverted =="
+elif [ "$NEGATIVE" = 1 ]; then
+    echo "== NEGATIVE: the energy hatch legs only, with the 11,980 FE assertion inverted =="
+    shape_legs
+    energy_legs
+    echo "NEGATIVE finished without failing (this is a bug in the test)"
+    exit 1
 else
     macerator_legs
 fi
-oven_legs
-if [ "$SELFTEST" = 0 ]; then
+if [ "$NEGATIVE" != 1 ]; then
+    oven_legs
+fi
+if [ "$SELFTEST" = 0 ] && [ "$NEGATIVE" = 0 ]; then
     recipes_legs
     shape_legs
+    energy_legs
 fi
 
 if [ "$SELFTEST" = 1 ]; then
     echo "SELFTEST finished without failing (this is a bug in the test)"
     exit 1
 fi
-echo "PASS: the coke oven's 3x3x3 shell of 22 bricks and three bronze hatches forms around its controller (formed true, missing 0, hatches 3): the input hatch feeds the run and the output hatch gives one coke for exactly 12,000 FE, the coal-dust recipe does the same, breaking one brick flips formed to false and freezes the run, a coil in the gap does not re-form it, a brick put back resumes the run, a hatch in a middle-ring position is refused, and /modern_industrialization recipes reads the coke oven kind's 2 data recipes back; the add-on's 3x3x4 shell of 17 bronze-plated bricks and 16 coil positions (two holding hatches) matches, one coil broken is missing 1 and a brick where a coil belongs is unformed; the electric macerator still holds 32,000 FE (3,200 EU), runs a stone at $RATE FE/t for exactly $STONE_FE FE into one cobblestone, an iron ore for $IRON_ORE_FE FE into three raw iron, reaches $OVERCLOCK_RATE FE/t at efficiency $OVERCLOCK_TICKS while an ancient debris still costs 1600 EU (16,000 FE), makes nothing without energy and burns nothing without an input, and a half-finished run survives save and relaunch; one .hmod carries the blocks, the data and the behaviour"
+echo "PASS: the coke oven's 3x3x3 shell of 22 bricks and three bronze hatches forms around its controller (formed true, missing 0, hatches 3): the input hatch feeds the run and the output hatch gives one coke for exactly 12,000 FE, the coal-dust recipe does the same, breaking one brick flips formed to false and freezes the run, a coil in the gap does not re-form it, a brick put back resumes the run, a hatch in a middle-ring position is refused, and /modern_industrialization recipes reads the coke oven kind's 2 data recipes back; the add-on's 3x3x4 shell of 17 bronze-plated bricks and 16 coil positions (two holding hatches) matches, one coil broken is missing 1 and a brick where a coil belongs is unformed; the energy hatch family's five tiers each hold their own buffer (LV 192,000, MV 768,000, HV 6,144,000, EV 49,152,000, SV i32::MAX FE) and clamp an over-fill, an LV energy input hatch holds a shell position while the middle ring refuses one, exactly 5,000 FE put into the hatch arrives in the controller's buffer, one 600-tick coke run pays exactly 12,000 FE out of the hatch while an 11,980 FE fill stalls 2 EU short and 20 more FE finish it, an LV energy output hatch drains the controller's buffer, the add-on's 3x3x4 shell takes an HV energy hatch and its readout names it, and the electric macerator still holds 32,000 FE (3,200 EU), runs a stone at $RATE FE/t for exactly $STONE_FE FE into one cobblestone, an iron ore for $IRON_ORE_FE FE into three raw iron, reaches $OVERCLOCK_RATE FE/t at efficiency $OVERCLOCK_TICKS while an ancient debris still costs 1600 EU (16,000 FE), makes nothing without energy and burns nothing without an input, and a half-finished run survives save and relaunch; one .hmod carries the blocks, the data and the behaviour"

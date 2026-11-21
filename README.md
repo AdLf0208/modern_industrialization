@@ -44,15 +44,27 @@ oven's recipes are a **data recipe kind** (`modern_industrialization:coke_oven`)
 `data/modern_industrialization/recipe/coke_oven/`, which another mod reads with the SDK's
 `recipes_of_type` rather than from a compiled table.
 
+The **energy hatch family** — `lv`/`mv`/`hv`/`ev`/`superconductor` `_energy_input_hatch` and
+`_energy_output_hatch`, ten blocks — may also hold a shell position where the hatch flags allow one.
+Each holds its cable tier's buffer (upstream's `EnergyHatch`: `30 * 20 * tier.eu` EU, i.e. 192,000
+FE for LV, 768,000 MV, 6,144,000 HV, 49,152,000 EV and — clamped to the pin's 32-bit buffer —
+2,147,483,647 FE for the superconductor tier). An input hatch is fillable from a cable and drained by
+the controller: the controller aggregates it into its own buffer and the run draws from there. An
+output hatch drains the controller. The superconductor tier's upstream 768,000,000,000 FE do not fit a
+32-bit buffer; `notes.md` records the clamp.
+
 `/modern_industrialization info <pos>` reports a machine's buffer, progress, rate, efficiency, and
-for the multiblock its shell (`formed true|false, missing N, hatches N`); `recipes` lists the coke
-oven kind's recipes as another mod reads them; `shape <pos>` matches the matcher's 3×3×4 harness
-fixture (the add-on's shell: 17 bronze-plated bricks and 16 coil positions, two holding hatches);
-`energy` and `efficiency` are the harness controls.
+for the multiblock its shell (`formed true|false, missing N, hatches N [kinds]`, naming each hatch);
+for an energy hatch it reports that hatch's own buffer and its tier's capacity. `recipes` lists the
+coke oven kind's recipes as another mod reads them; `shape <pos>` matches the matcher's 3×3×4 harness
+fixture (the add-on's shell: 17 bronze-plated bricks and 16 coil positions, two holding hatches, also
+named); `energy` (which fills a machine's or a hatch's buffer) and `efficiency` are the harness
+controls.
 
 Everything else in the mod (the other machine families, the blast furnace and the rest of the
-multiblocks, the energy hatches and the other tiers, the generators, the pipes, the material part
-system, the tools and the GuideME book) is not ported; `notes.md` has the complete gap list.
+multiblocks, the item/fluid hatches' other tiers, the cable tiers themselves, the generators, the
+pipes, the material part system, the tools and the GuideME book) is not ported; `notes.md` has the
+complete gap list.
 
 ## The package
 
@@ -65,7 +77,7 @@ modern_industrialization.hmod
   src/lib.rs         the one #[mod_api::horizon_mod] impl Hooks: the two block entity types and
                      their Parts, the shape match (block_changed + level_tick_post), the
                      container and energy declarations, and the commands
-  src/runtime.rs     the port's pure logic, the shell template, the hatch flags and its 50 tests
+  src/runtime.rs     the port's pure logic, the shell template, the hatch flags and its 59 tests
   assets/ data/      the carried content (blocks, items, models, textures, lang, loot, tags)
   LICENSE, LICENSE-NOTICE.md, data/modern_industrialization/license/
 ```

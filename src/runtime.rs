@@ -1001,13 +1001,129 @@ pub const KANTHAL_COIL: &str = "modern_industrialization:kanthal_coil";
 
 /// The hatch kinds the coke oven's end-layer positions accept: upstream's
 /// `HatchFlags.Builder().with(ITEM_INPUT).with(ITEM_OUTPUT).with(FLUID_INPUT)
-/// .with(FLUID_OUTPUT).build()`.
+/// .with(FLUID_OUTPUT).build()` plus the **energy family** this slice adds.
+///
+/// Upstream's coke oven is a steam machine and its own `HatchFlags` name only the
+/// four item/fluid kinds; a position that accepts `ENERGY_INPUT` is an *electric*
+/// multiblock's (`AbstractElectricCraftingMultiblockBlockEntity`'s
+/// `appendEnergyInputs`). This port has no electric multiblock yet, so the coke
+/// oven carries the energy hatch's aggregation — the one controller this slice
+/// owns — and `notes.md` records that as a deviation: a player can build a coke
+/// oven shell with an energy hatch in it, where upstream would refuse the shape.
 pub const COKE_OVEN_HATCHES: &[HatchKind] = &[
     HatchKind::ItemInput,
     HatchKind::ItemOutput,
     HatchKind::FluidInput,
     HatchKind::FluidOutput,
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Lv,
+        input: true,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Lv,
+        input: false,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Mv,
+        input: true,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Mv,
+        input: false,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Hv,
+        input: true,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Hv,
+        input: false,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Ev,
+        input: true,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Ev,
+        input: false,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Superconductor,
+        input: true,
+    },
+    HatchKind::EnergyHatch {
+        tier: HatchTier::Superconductor,
+        input: false,
+    },
 ];
+
+/// A cable tier: upstream's `CableTier`, which decides an energy hatch's buffer.
+///
+/// `CableTier`'s `eu` is the EU a tick the tier carries — 32, 128, 1,024, 8,192
+/// and 128,000,000 — and `EnergyHatch`'s buffer is `30 * 20 * tier.getEu()` EU
+/// (one second of that tier's transfer, in EU). The five tiers are the ones
+/// `MultiblockHatches.registerEnergyHatches` registers in base MI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HatchTier {
+    /// Low voltage: 32 EU/t.
+    Lv,
+    /// Medium voltage: 128 EU/t.
+    Mv,
+    /// High voltage: 1,024 EU/t.
+    Hv,
+    /// Extreme voltage: 8,192 EU/t.
+    Ev,
+    /// Superconductor: 128,000,000 EU/t.
+    Superconductor,
+}
+
+impl HatchTier {
+    /// Every tier base MI registers, in `CableTier`'s own order.
+    pub const ALL: [Self; 5] = [Self::Lv, Self::Mv, Self::Hv, Self::Ev, Self::Superconductor];
+
+    /// The block-id prefix and `CableTier.name` (`lv`, …, `superconductor`).
+    #[must_use]
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::Lv => "lv",
+            Self::Mv => "mv",
+            Self::Hv => "hv",
+            Self::Ev => "ev",
+            Self::Superconductor => "superconductor",
+        }
+    }
+
+    /// The tier a block-id prefix names.
+    #[must_use]
+    pub fn from_prefix(prefix: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|tier| tier.prefix() == prefix)
+    }
+
+    /// `CableTier.eu`: the EU a tick the tier carries (`getEu`).
+    #[must_use]
+    pub fn eu(self) -> i64 {
+        match self {
+            Self::Lv => 32,
+            Self::Mv => 128,
+            Self::Hv => 1_024,
+            Self::Ev => 8_192,
+            Self::Superconductor => 128_000_000,
+        }
+    }
+
+    /// The hatch's buffer in FE: upstream's `30 * 20 * tier.getEu()` EU at this
+    /// mod's own 1 EU = 10 FE.
+    ///
+    /// The superconductor tier's 76,800,000,000 EU do not fit this pin's 32-bit FE
+    /// buffer (`ModEnergyBuffer::capacity` is an `i32`), so it keeps the largest it
+    /// can — `i32::MAX` FE, 214,748,364 EU, 0.28 % of upstream's — and `notes.md`
+    /// records the difference rather than hiding it.
+    #[must_use]
+    pub fn capacity_fe(self) -> i32 {
+        let fe = 600 * self.eu() * i64::from(FE_PER_EU);
+        i32::try_from(fe).unwrap_or(i32::MAX)
+    }
+}
 
 /// The steam tier's EU a tick: `SteamCraftingMultiblockBlockEntity.getBaseRecipeEu`
 /// is `overclockComponent.getRecipeEu(steelHatches ? 4 : 2)` and `getMaxRecipeEu`
@@ -1065,8 +1181,8 @@ impl ShellMember {
 }
 
 /// A kind of hatch a multiblock position may hold: the four kinds the coke
-/// oven's `HatchFlags` allows and the five the add-on's 3×3×4 shell needs (its
-/// energy hatch is a later slice, `notes.md` 6a). Upstream's `HatchType`.
+/// oven's `HatchFlags` allows and the energy family `MultiBlockHatches` registers
+/// (ten blocks: five cable tiers, in and out). Upstream's `HatchType`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HatchKind {
     /// An item hatch the multiblock takes its inputs from.
@@ -1077,10 +1193,19 @@ pub enum HatchKind {
     FluidInput,
     /// A fluid hatch the multiblock puts its outputs into.
     FluidOutput,
+    /// An energy hatch of one cable tier: upstream's `EnergyHatch`, whose
+    /// `appendEnergyInputs`/`appendEnergyOutputs` put its buffer into the
+    /// multiblock's (`AbstractElectricCraftingMultiblockBlockEntity`).
+    EnergyHatch {
+        /// The cable tier, which decides the buffer (`HatchTier::capacity_fe`).
+        tier: HatchTier,
+        /// Whether it feeds the multiblock (an input hatch) or drains it.
+        input: bool,
+    },
 }
 
 impl HatchKind {
-    /// Every kind this slice ports, in upstream's registration order.
+    /// Every kind slice 3 ports, in upstream's registration order.
     pub const ALL: [Self; 4] = [
         Self::ItemInput,
         Self::ItemOutput,
@@ -1088,7 +1213,58 @@ impl HatchKind {
         Self::FluidOutput,
     ];
 
-    /// The block this kind is made of: the bronze hatch the jar registers.
+    /// The energy hatches, in `registerEnergyHatches`'s order: one input and one
+    /// output per tier, tier by tier.
+    pub const ENERGY: [Self; 10] = [
+        Self::EnergyHatch {
+            tier: HatchTier::Lv,
+            input: true,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Lv,
+            input: false,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Mv,
+            input: true,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Mv,
+            input: false,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Hv,
+            input: true,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Hv,
+            input: false,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Ev,
+            input: true,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Ev,
+            input: false,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Superconductor,
+            input: true,
+        },
+        Self::EnergyHatch {
+            tier: HatchTier::Superconductor,
+            input: false,
+        },
+    ];
+
+    /// Every hatch kind this slice ships: the four item/fluid kinds, then the ten
+    /// energy ones.
+    pub fn every() -> impl Iterator<Item = Self> {
+        Self::ALL.into_iter().chain(Self::ENERGY)
+    }
+
+    /// The block this kind is made of: the bronze hatch or the tier's energy hatch.
     #[must_use]
     pub fn block(self) -> &'static str {
         match self {
@@ -1096,16 +1272,33 @@ impl HatchKind {
             Self::ItemOutput => BRONZE_ITEM_OUTPUT_HATCH,
             Self::FluidInput => BRONZE_FLUID_INPUT_HATCH,
             Self::FluidOutput => BRONZE_FLUID_OUTPUT_HATCH,
+            Self::EnergyHatch { tier, input } => match (tier, input) {
+                (HatchTier::Lv, true) => "modern_industrialization:lv_energy_input_hatch",
+                (HatchTier::Lv, false) => "modern_industrialization:lv_energy_output_hatch",
+                (HatchTier::Mv, true) => "modern_industrialization:mv_energy_input_hatch",
+                (HatchTier::Mv, false) => "modern_industrialization:mv_energy_output_hatch",
+                (HatchTier::Hv, true) => "modern_industrialization:hv_energy_input_hatch",
+                (HatchTier::Hv, false) => "modern_industrialization:hv_energy_output_hatch",
+                (HatchTier::Ev, true) => "modern_industrialization:ev_energy_input_hatch",
+                (HatchTier::Ev, false) => "modern_industrialization:ev_energy_output_hatch",
+                (HatchTier::Superconductor, true) => {
+                    "modern_industrialization:superconductor_energy_input_hatch"
+                }
+                (HatchTier::Superconductor, false) => {
+                    "modern_industrialization:superconductor_energy_output_hatch"
+                }
+            },
         }
     }
 
     /// The kind a block id is, if it is one of this slice's hatches.
     #[must_use]
     pub fn from_block(block: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.block() == block)
+        Self::every().find(|kind| kind.block() == block)
     }
 
-    /// The stable number this port saves in a controller's `hatchKinds`.
+    /// The stable number this port saves in a controller's `hatchKinds`: 0–3 for
+    /// the item/fluid kinds, then 4–13 for the energy ones, tier by tier.
     #[must_use]
     pub fn code(self) -> i32 {
         match self {
@@ -1113,13 +1306,20 @@ impl HatchKind {
             Self::ItemOutput => 1,
             Self::FluidInput => 2,
             Self::FluidOutput => 3,
+            Self::EnergyHatch { .. } => {
+                let index = Self::ENERGY
+                    .iter()
+                    .position(|kind| *kind == self)
+                    .unwrap_or(0);
+                4 + i32::try_from(index).unwrap_or(0)
+            }
         }
     }
 
     /// The kind a saved code is, if it is one.
     #[must_use]
     pub fn from_code(code: i32) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.code() == code)
+        Self::every().find(|kind| kind.code() == code)
     }
 
     /// Whether the hatch takes items or fluid out of the multiblock.
@@ -1128,10 +1328,30 @@ impl HatchKind {
         matches!(self, Self::ItemInput | Self::ItemOutput)
     }
 
+    /// Whether the hatch carries energy rather than an item or a fluid.
+    #[must_use]
+    pub fn is_energy(self) -> bool {
+        matches!(self, Self::EnergyHatch { .. })
+    }
+
     /// Whether the hatch feeds the multiblock rather than draining it.
     #[must_use]
     pub fn is_input(self) -> bool {
-        matches!(self, Self::ItemInput | Self::FluidInput)
+        match self {
+            Self::ItemInput | Self::FluidInput => true,
+            Self::ItemOutput | Self::FluidOutput => false,
+            Self::EnergyHatch { input, .. } => input,
+        }
+    }
+
+    /// The hatch's own FE capacity: the tier's buffer for an energy hatch, 0 for
+    /// the item and fluid kinds (which hold no energy).
+    #[must_use]
+    pub fn capacity_fe(self) -> i32 {
+        match self {
+            Self::EnergyHatch { tier, .. } => tier.capacity_fe(),
+            Self::ItemInput | Self::ItemOutput | Self::FluidInput | Self::FluidOutput => 0,
+        }
     }
 }
 
@@ -1549,6 +1769,21 @@ pub fn merge_count(source: (&str, u32), target: Option<(&str, u32)>, stack_size:
         Some(_) => 0,
         None => stack_size.min(count),
     }
+}
+
+/// How much energy a move lifts from one buffer into another: what the source
+/// holds, what the target's room allows, and the move's own limit, whichever is
+/// smallest, never negative.
+///
+/// This is the energy half of the hatch pump (`merge_count` is the item half):
+/// upstream's `AbstractElectricCraftingMultiblockBlockEntity.consumeEu` draws the
+/// EU straight out of the hatches' `EnergyComponent`s, and this port's glue moves
+/// the same energy into the controller's own buffer one tick at a time, so the
+/// arithmetic is pure and tested without a world.
+#[must_use]
+pub fn move_energy_count(from: i32, to: i32, to_capacity: i32, max: i32) -> i32 {
+    let room = to_capacity.saturating_sub(to).max(0);
+    from.max(0).min(max.max(0)).min(room)
 }
 
 /// The add-on `industrialization_overdrive`'s pyrolyse oven shell, as its
@@ -2493,7 +2728,9 @@ mod tests {
             "the middle ring is brick-only"
         );
         assert_eq!(HatchKind::ALL.len(), 4);
-        assert_eq!(COKE_OVEN_HATCHES.len(), 4);
+        // The jar's flags name four kinds; the energy family (10 blocks, 5 tiers x
+        // in/out) is the fifth hatch kind this slice adds to the same positions.
+        assert_eq!(COKE_OVEN_HATCHES.len(), 14);
     }
 
     #[test]
@@ -2696,6 +2933,287 @@ mod tests {
         assert_eq!(COKE_RECIPES[0].eu, 2);
         assert_eq!(COKE_RECIPES[0].duration, 600);
         assert_eq!(COKE_RECIPE_KIND, "modern_industrialization:coke_oven");
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 4: the energy hatch family
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_energy_hatch_family_is_the_five_cable_tiers() {
+        // `MultiblockHatches.registerEnergyHatches(CableTier)` registers one pair per
+        // tier, and `EnergyHatch`'s buffer is `30 * 20 * tier.getEu()` EU, i.e. 600 EU
+        // per tier EU. At this mod's own 1 EU = 10 FE that is 6,000 FE per tier EU.
+        let want = [
+            (HatchTier::Lv, "lv", 32, 192_000),
+            (HatchTier::Mv, "mv", 128, 768_000),
+            (HatchTier::Hv, "hv", 1_024, 6_144_000),
+            (HatchTier::Ev, "ev", 8_192, 49_152_000),
+            // 600 x 128,000,000 EU = 76,800,000,000 EU = 768,000,000,000 FE, past the
+            // pin's 32-bit FE buffer: the port keeps the largest it can (i32::MAX FE,
+            // 214,748,364 EU) and `notes.md` records the difference.
+            (
+                HatchTier::Superconductor,
+                "superconductor",
+                128_000_000,
+                i32::MAX,
+            ),
+        ];
+        assert_eq!(
+            HatchTier::ALL.len(),
+            want.len(),
+            "the jar's five cable tiers"
+        );
+        for (tier, prefix, eu, capacity) in want {
+            assert_eq!(tier.prefix(), prefix);
+            assert_eq!(tier.eu(), eu, "{prefix} EU");
+            assert_eq!(tier.capacity_fe(), capacity, "{prefix} FE");
+        }
+    }
+
+    #[test]
+    fn every_hatch_kind_has_one_block_and_one_saved_code() {
+        let kinds: Vec<HatchKind> = HatchKind::every().collect();
+        assert_eq!(kinds.len(), 14, "4 item/fluid + 5 tiers x 2 directions");
+        for (index, kind) in kinds.iter().enumerate() {
+            assert!(
+                kinds[..index]
+                    .iter()
+                    .all(|other| other.block() != kind.block()),
+                "{} twice",
+                kind.block()
+            );
+            assert!(kind.block().starts_with("modern_industrialization:"));
+            assert_eq!(HatchKind::from_block(kind.block()), Some(*kind));
+            assert_eq!(kind.code(), i32::try_from(index).unwrap());
+            assert_eq!(HatchKind::from_code(kind.code()), Some(*kind));
+            assert!(is_hatch(kind.block()));
+        }
+        assert_eq!(HatchKind::from_block("modern_industrialization:nope"), None);
+        assert_eq!(HatchKind::from_code(14), None);
+        // The four kinds slice 3 shipped keep their ids and their saved codes.
+        assert_eq!(HatchKind::ItemInput.code(), 0);
+        assert_eq!(HatchKind::ItemOutput.code(), 1);
+        assert_eq!(HatchKind::FluidInput.code(), 2);
+        assert_eq!(HatchKind::FluidOutput.code(), 3);
+    }
+
+    #[test]
+    fn the_energy_hatch_blocks_are_upstreams_ten_ids() {
+        let input = HatchKind::EnergyHatch {
+            tier: HatchTier::Lv,
+            input: true,
+        };
+        let output = HatchKind::EnergyHatch {
+            tier: HatchTier::Lv,
+            input: false,
+        };
+        assert_eq!(
+            input.block(),
+            "modern_industrialization:lv_energy_input_hatch"
+        );
+        assert_eq!(
+            output.block(),
+            "modern_industrialization:lv_energy_output_hatch"
+        );
+        assert_eq!(
+            HatchKind::EnergyHatch {
+                tier: HatchTier::Superconductor,
+                input: false,
+            }
+            .block(),
+            "modern_industrialization:superconductor_energy_output_hatch"
+        );
+        // `registerEnergyHatches` names the block `<tier>_energy_<input|output>_hatch`.
+        for kind in HatchKind::ENERGY {
+            let Some(HatchKind::EnergyHatch { tier, input }) = Some(kind) else {
+                panic!("{kind:?} is not an energy hatch");
+            };
+            let direction = if input {
+                "energy_input"
+            } else {
+                "energy_output"
+            };
+            assert_eq!(
+                kind.block(),
+                format!(
+                    "modern_industrialization:{}_{direction}_hatch",
+                    tier.prefix()
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn an_energy_hatch_is_a_direction_and_a_tier_but_never_an_item_hatch() {
+        let input = HatchKind::EnergyHatch {
+            tier: HatchTier::Mv,
+            input: true,
+        };
+        let output = HatchKind::EnergyHatch {
+            tier: HatchTier::Mv,
+            input: false,
+        };
+        assert!(input.is_energy() && output.is_energy());
+        assert!(input.is_input() && !output.is_input());
+        assert!(!input.is_item() && !output.is_item());
+        assert_eq!(input.capacity_fe(), 768_000);
+        assert_eq!(output.capacity_fe(), 768_000);
+        assert_eq!(HatchKind::ItemInput.capacity_fe(), 0);
+        assert!(!HatchKind::ItemInput.is_energy());
+    }
+
+    #[test]
+    fn a_hatchable_coke_oven_position_takes_an_energy_hatch_of_any_tier() {
+        for member in COKE_OVEN_SHELL
+            .iter()
+            .filter(|member| !member.hatches.is_empty())
+        {
+            for kind in HatchKind::ENERGY {
+                assert!(member.allows(kind), "{kind:?} at {:?}", member.offset);
+            }
+        }
+        // The middle ring keeps `HatchFlags.NO_HATCH`: bricks only, energy or not.
+        let ring = COKE_OVEN_SHELL
+            .iter()
+            .find(|member| member.offset == [1, 0, 0])
+            .expect("the middle ring's +x position");
+        assert!(!ring.allows(HatchKind::EnergyHatch {
+            tier: HatchTier::Lv,
+            input: true,
+        }));
+    }
+
+    #[test]
+    fn an_energy_hatch_forms_the_coke_oven_and_its_tier_is_recorded() {
+        let bench = shelf()
+            .with(
+                [-1, -1, 0],
+                "modern_industrialization:lv_energy_input_hatch",
+            )
+            .with([1, 1, 2], "modern_industrialization:ev_energy_output_hatch");
+        let matched = match_shell(&bench, [0, 0, 0], COKE_OVEN_SHELL);
+        assert!(matched.formed, "{matched:?}");
+        assert_eq!(matched.missing, 0);
+        assert_eq!(
+            matched.hatches,
+            vec![
+                (
+                    [-1, -1, 0],
+                    HatchKind::EnergyHatch {
+                        tier: HatchTier::Lv,
+                        input: true
+                    }
+                ),
+                (
+                    [1, 1, 2],
+                    HatchKind::EnergyHatch {
+                        tier: HatchTier::Ev,
+                        input: false
+                    }
+                ),
+            ],
+            "the per-position kinds are the layout the controller saves"
+        );
+        // A player swapping a brick for an energy hatch changes a match.
+        assert!(shell_relevant(
+            "minecraft:bricks",
+            "modern_industrialization:lv_energy_input_hatch"
+        ));
+        assert!(shell_relevant(
+            "modern_industrialization:hv_energy_output_hatch",
+            "minecraft:air"
+        ));
+    }
+
+    #[test]
+    fn the_add_on_shell_takes_an_energy_hatch_at_its_hatch_positions() {
+        // `industrialization_overdrive`'s pyrolyse shell flags ENERGY_INPUT at its
+        // hatch positions (FINDINGS.md:52), so the fixture must accept one.
+        let members = pyrolyse_shape_fixture();
+        let hatchable: Vec<[i32; 3]> = members
+            .iter()
+            .filter(|member| !member.hatches.is_empty())
+            .map(|member| member.offset)
+            .collect();
+        assert_eq!(hatchable.len(), 2);
+        let bench = ShellBench::complete_with([0, 0, 0], &members)
+            .with(
+                hatchable[0],
+                "modern_industrialization:mv_energy_input_hatch",
+            )
+            .with(
+                hatchable[1],
+                "modern_industrialization:lv_energy_input_hatch",
+            );
+        let matched = match_shell(&bench, [0, 0, 0], &members);
+        assert!(matched.formed, "{matched:?}");
+        assert_eq!(matched.hatches.len(), 2);
+    }
+
+    #[test]
+    fn the_pump_takes_only_what_the_target_holds_room_for() {
+        assert_eq!(
+            move_energy_count(5_000, 0, COKE_CAPACITY_FE, i32::MAX),
+            5_000
+        );
+        assert_eq!(
+            move_energy_count(192_000, 30_000, COKE_CAPACITY_FE, i32::MAX),
+            2_000,
+            "the controller's own buffer is the room"
+        );
+        assert_eq!(
+            move_energy_count(1_000, COKE_CAPACITY_FE, COKE_CAPACITY_FE, i32::MAX),
+            0,
+            "a full target takes nothing"
+        );
+        assert_eq!(move_energy_count(0, 5, COKE_CAPACITY_FE, i32::MAX), 0);
+        assert_eq!(
+            move_energy_count(-5, 0, COKE_CAPACITY_FE, i32::MAX),
+            0,
+            "a corrupt buffer moves nothing"
+        );
+        assert_eq!(
+            move_energy_count(5_000, 0, COKE_CAPACITY_FE, 1_000),
+            1_000,
+            "a limit caps the move"
+        );
+    }
+
+    #[test]
+    fn an_energy_hatch_pays_for_a_whole_coke_run_and_twenty_fe_short_of_one_more() {
+        // The controller's buffer is fed from the hatch (`move_energy_count`) and the
+        // run draws from it: exactly 12,000 FE makes one coke and leaves nothing.
+        let mut oven = CokeOven {
+            formed: true,
+            ..Default::default()
+        };
+        let moved = move_energy_count(12_000, 0, COKE_CAPACITY_FE, i32::MAX);
+        assert_eq!(oven.insert_fe(moved), 12_000);
+        let mut bench = Bench::new(&[("minecraft:coal", 1)]);
+        for _ in 0..600 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(oven.energy, 0, "the run took exactly what the hatch held");
+        assert_eq!(bench.out("modern_industrialization:coke"), 1);
+
+        // One tick's worth short (11,980 FE) leaves the run 2 EU from its end: no coke.
+        let mut oven = CokeOven {
+            formed: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            oven.insert_fe(move_energy_count(11_980, 0, COKE_CAPACITY_FE, i32::MAX)),
+            11_980
+        );
+        let mut bench = Bench::new(&[("minecraft:coal", 1)]);
+        for _ in 0..620 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(bench.out("modern_industrialization:coke"), 0);
+        assert_eq!(oven.energy, 0);
+        assert_eq!(oven.status().progress_permille, 998, "1198 of 1200 EU");
+        assert!(oven.active.is_some(), "the run is stalled, not over");
     }
 
     #[test]

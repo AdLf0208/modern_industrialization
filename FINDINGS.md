@@ -231,5 +231,41 @@ has a **mod-readable machine recipe kind**: `register_recipe_type` +
 | fluid hatches hold steam and the recipes consume it | the tank is declared, the recipes take no fluid (their data declares none), the creosote output is dropped | a mod fluid cannot live in a BE tank via `fluid_insert` at this pin (`enderstorage` gap) |
 | `tickTransfer` moves items/fluids with `autoInsert`/`autoExtract` | the controller's `level_tick_post` pump moves one stack a tick between the hatch and the run | the controller is the side that has the tick and the run |
 | the hatch model is the `modern_industrialization:machine` loader (casing + overlays) | a port-authored plain model with the jar's textures | the custom model loader is a client mod feature |
-| the energy hatches overclock the steam tier to 4 EU/t | not ported | a different, tiered family; the coke oven runs at 2 EU/t |
+| the energy hatches overclock the steam tier to 4 EU/t | not ported | upstream's **steel hatches** are what `getBaseRecipeEu` reads for the 4 EU/t (`steelHatches ? 4 : 2`); slice 4 ports the *energy* hatch family, which a steam multiblock does not take at all |
 | the shape includes the hatches in its `ShapeMatcher` cache | `block_changed` re-matches on any brick/hatch/controller change; the hatch layout is saved in `hatchKinds` | one write per change, no cache to invalidate |
+
+## Slice 4: the energy hatch family
+
+Read from `AztechMC/Modern-Industrialization` tag `2.5.12`, commit `a02b76f4…8b57` (shallow clone at
+`ports/_shared/upstream/modern_industrialization/`, deleted after these findings): files/areas
+`machines/init/MultiblockHatches.java` (`registerEnergyHatches`, the ten `HatchPair`s),
+`machines/blockentities/hatches/EnergyHatch.java` (the buffer, the capability direction, what
+`appendEnergyInputs`/`appendEnergyOutputs` hand to the multiblock),
+`machines/blockentities/multiblocks/AbstractElectricCraftingMultiblockBlockEntity.java`
+(`energyInputs`, `consumeEu`, `onRematch`), `api/energy/CableTier.java` (the five tiers and their
+`eu`), `machines/init/MultiblockMachines.java` (`cokeOven`'s `HatchFlags`: no `ENERGY_INPUT`),
+`machines/multiblocks/HatchFlags.java` (`NO_HATCH`), `datagen/recipe/HatchRecipesProvider.java` (each
+hatch's craft recipe = its tier's cable + its tier's machine hull), and the jar's
+`assets/…/models/block/*_energy_{input,output}_hatch.json`, `blockstates/`, `lang/en_us.json`
+(`"LV Energy Input Hatch"` …) and the `machines/hatch_energy/overlay_side`,
+`overlays/output_energy` textures.
+
+| What it says | Where |
+|---|---|
+| five tiers, in and out: `lv`, `mv`, `hv`, `ev`, `superconductor` `_energy_{input,output}_hatch` | `MultiblockHatches.LV_ENERGY` … `SUPERCONDUCTOR_ENERGY` |
+| the buffer is `30 * 20 * tier.getEu()` EU — 600 × tier EU | `EnergyHatch`'s constructor |
+| `CableTier.eu`: 32 / 128 / 1,024 / 8,192 / 128,000,000 | `CableTier.LV` … `.SUPERCONDUCTOR` |
+| an input hatch is fillable only, an output hatch drainable only, and only by its own tier's cable | `tier2 == tier` in `buildInsertable`/`buildExtractable` |
+| the input hatch's component joins the multiblock's `energyInputs`; the crafter drains them in order | `appendEnergyInputs`, `consumeEu` |
+| the coke oven's own flags are the four item/fluid kinds | `MultiblockMachines.cokeOven` |
+
+### Where this slice's rewrite differs
+
+| Upstream | This port | Why |
+|---|---|---|
+| the buffer is `long` EU | int FE at 1 EU = 10 FE; the superconductor tier clamps at `i32::MAX` FE | `ModEnergyBuffer::capacity` is an `i32` at this pin |
+| the crafter drains the hatches' components directly | the controller's `level_tick_post` pump moves a hatch's energy into its own buffer (32,000 FE), then the run draws from it | the run's tick cannot read the level, so it cannot reach a hatch; energy is conserved and the run's cost is unchanged |
+| a hatch accepts only its own cable tier | any energy source fills an input hatch, any drain empties an output one | the port has no cable tiers |
+| the coke oven's shell refuses `ENERGY_INPUT` (steam machine) | the coke oven's hatch positions accept the energy family | the port has no electric multiblock yet; the family's aggregation is proven on the controller it owns (`notes.md`) |
+| an output hatch's `tickTransfer` pushes energy out by its orientation | the buffer is what a cable or the pump reaches | no orientation state (slice 1, gap 7) |
+| the hatch's craft recipe is its tier's cable + hull | no craft recipe (neither ingredient is registered here) | the blocks come from the creative tab, as every block of this port |

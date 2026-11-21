@@ -44,7 +44,7 @@ use runtime::{
     COKE_RECIPE_KIND, CokeOven, FE_PER_EU, HatchKind, MACERATOR_ID, Macerator, MachineRecipe,
     OUTPUT_SLOTS, OvenSaved, PROBABILITY_SCALE, STACK_SIZE, Saved, Shell, ShellMatch, Slots,
     Status, coke_recipe, hatch_members, is_coke_oven, is_macerator, match_shell, merge_count,
-    pyrolyse_shape_fixture, recipe, shell_relevant,
+    move_energy_count, pyrolyse_shape_fixture, recipe, shell_relevant,
 };
 
 /// The item input slot (`MachineRecipeType.MACERATOR.withItemInputs()`).
@@ -196,6 +196,36 @@ impl Hooks for Mod {
                 tanks.outputs = if kind.is_input() { Vec::new() } else { vec![0] };
                 r.block_fluids(&hatch, tanks);
             }
+        }
+
+        // The energy hatch family: ten blocks, one per cable tier and direction, each
+        // with its tier's buffer (upstream's `EnergyHatch`: `30 * 20 * tier.eu` EU).
+        // An input hatch is fillable through its capability and not drainable
+        // (`insertable`), an output hatch the other way round (`extractable`); the
+        // controller's pump moves the energy through the block entity's saved `energy`
+        // key, which is the same store the capability reads.
+        for kind in HatchKind::ENERGY {
+            let id = kind.block();
+            let path = id.strip_prefix("modern_industrialization:").unwrap_or(id);
+            let hatch = r.block_key(id);
+            let hatch_kind = r.block_entity_type(path).blocks(&[path]).build();
+            let _ = r.block_entity_part(&hatch_kind, EnergyHatchPart);
+            let capacity = kind.capacity_fe();
+            let (max_insert, max_extract, insert_faces, extract_faces) = if kind.is_input() {
+                (capacity, 0, [true; 6], [false; 6])
+            } else {
+                (0, capacity, [false; 6], [true; 6])
+            };
+            r.block_energy(
+                &hatch,
+                ModEnergyBuffer {
+                    capacity,
+                    max_insert,
+                    max_extract,
+                    insert_faces,
+                    extract_faces,
+                },
+            );
         }
 
         // The coke oven's recipe kind, readable by another mod: the two files
@@ -560,6 +590,27 @@ impl BlockEntityPart for HatchPart {
         } else {
             *event.reply = BlockEntityTickReply::Unchanged;
         }
+    }
+}
+
+/// An energy hatch's block entity Part. It has no storage of its own to materialise:
+/// its buffer is the saved `energy` key the declared capability reads and writes, so
+/// the Part only answers the initial empty compound. The transfer belongs to the
+/// controller's pump, as upstream's `appendEnergyInputs` hands the hatch's component
+/// to the multiblock.
+struct EnergyHatchPart;
+
+#[mod_api::horizon_part]
+impl BlockPart for EnergyHatchPart {}
+
+#[mod_api::horizon_part]
+impl BlockEntityPart for EnergyHatchPart {
+    fn block_entity(
+        &self,
+        _level: LevelSide,
+        _event: &mut BlockEntityEvent<'_>,
+    ) -> Option<Compound> {
+        Some(Compound::new())
     }
 }
 
@@ -938,7 +989,7 @@ fn pump_hatches(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) -> bo
     {
         let transaction = seal.transaction();
         for (index, kind) in kinds.iter().enumerate() {
-            let Some(kind @ (HatchKind::ItemInput | HatchKind::ItemOutput)) = *kind else {
+            let Some(kind) = *kind else {
                 continue;
             };
             let Some(offset) = offsets.get(index) else {
@@ -948,11 +999,79 @@ fn pump_hatches(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) -> bo
             let Some(hatch) = host.block_entity(level, hatch_pos) else {
                 continue;
             };
-            pump_item(host, transaction, controller, hatch, kind);
+            match kind {
+                HatchKind::ItemInput | HatchKind::ItemOutput => {
+                    pump_item(host, transaction, controller, hatch, kind);
+                }
+                HatchKind::EnergyHatch { .. } => pump_energy(host, controller, hatch, kind),
+                HatchKind::FluidInput | HatchKind::FluidOutput => {}
+            }
         }
     }
     host.transaction_close(&seal, true);
     true
+}
+
+/// Moves energy between one energy hatch and the controller's own buffer once a
+/// tick: an input hatch fills the controller, an output hatch drains it.
+///
+/// Upstream's electric multiblocks draw straight out of the hatches'
+/// `EnergyComponent`s (`AbstractElectricCraftingMultiblockBlockEntity.consumeEu`);
+/// this port's controller keeps the run's buffer itself, so the same energy is
+/// moved into it here — through the saved `energy` key, which is the store the
+/// declared capability reads and the tick reads.
+fn pump_energy(
+    host: &mut dyn ServerHost,
+    controller: BlockEntityRef,
+    hatch: BlockEntityRef,
+    kind: HatchKind,
+) {
+    let capacity = kind.capacity_fe();
+    if capacity == 0 {
+        return;
+    }
+    let (hatch_energy, controller_energy) = {
+        let base: &dyn Host = &*host;
+        let (Some(hatch_nbt), Some(controller_nbt)) = (hatch.data(base), controller.data(base))
+        else {
+            return;
+        };
+        (
+            be_int(&hatch_nbt, "energy").clamp(0, capacity),
+            be_int(&controller_nbt, "energy").clamp(0, COKE_CAPACITY_FE),
+        )
+    };
+    let moved = if kind.is_input() {
+        move_energy_count(hatch_energy, controller_energy, COKE_CAPACITY_FE, i32::MAX)
+    } else {
+        move_energy_count(controller_energy, hatch_energy, capacity, i32::MAX)
+    };
+    if moved <= 0 {
+        return;
+    }
+    let (from, from_after, to, to_after) = if kind.is_input() {
+        (
+            hatch,
+            hatch_energy - moved,
+            controller,
+            controller_energy + moved,
+        )
+    } else {
+        (
+            controller,
+            controller_energy - moved,
+            hatch,
+            hatch_energy + moved,
+        )
+    };
+    // Only the `energy` key is merged, so the hatch's or the controller's other
+    // keys (the run, `formed`, the hatch layout) stay as they are.
+    let mut source = Compound::new();
+    source.insert("energy".into(), Tag::Int(from_after));
+    let _ = from.merge_data(host, source);
+    let mut target = Compound::new();
+    target.insert("energy".into(), Tag::Int(to_after));
+    let _ = to.merge_data(host, target);
 }
 
 /// Moves one stack between one item hatch and the controller's internal slots:
@@ -1132,6 +1251,23 @@ fn oven_id(host: &dyn Host, entity: BlockEntityRef) -> Option<String> {
     is_coke_oven(&id).then_some(id)
 }
 
+/// Whether the block entity is an energy hatch, answering its kind when it is.
+fn energy_hatch_kind(host: &dyn Host, entity: BlockEntityRef) -> Option<HatchKind> {
+    let id = entity.kind(host)?.id(host);
+    HatchKind::from_block(&id).filter(|kind| kind.is_energy())
+}
+
+/// The hatch block ids of a saved layout, without the namespace, in the shell's
+/// own order: `bronze_item_input_hatch, lv_energy_input_hatch`.
+fn chunk_names(kinds: &[Option<HatchKind>]) -> String {
+    kinds
+        .iter()
+        .flatten()
+        .map(|kind| kind.block().trim_start_matches("modern_industrialization:"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// `/modern_industrialization recipes`: the coke oven's recipe kind, as another
 /// mod reads it. `Host::recipes_of_type` is the call the add-on makes; printing
 /// the ids and the files' JSON is the proof that the kind and its data are in
@@ -1177,10 +1313,18 @@ fn match_shape(host: &mut dyn ServerHost, command: &CommandInvocation) {
     );
     let now = level.game_time(&*host).unwrap_or(0);
     let formed = if matched.formed { "true" } else { "false" };
+    // The kinds the hatch positions hold, so the readout names them and not only
+    // their count (`lv_energy_input_hatch, bronze_item_input_hatch`).
+    let names = matched
+        .hatches
+        .iter()
+        .map(|(_, kind)| kind.block().trim_start_matches("modern_industrialization:"))
+        .collect::<Vec<_>>()
+        .join(", ");
     say(
         host,
         format!(
-            "pyrolyse shape at {},{},{}: formed {formed}, missing {}, hatches {} ({} members), t={now}",
+            "pyrolyse shape at {},{},{}: formed {formed}, missing {}, hatches {} [{names}] ({} members), t={now}",
             pos[0],
             pos[1],
             pos[2],
@@ -1235,9 +1379,13 @@ fn report(host: &mut dyn ServerHost, command: &CommandInvocation) {
             let eu = status.energy / FE_PER_EU;
             let fe_per_tick = status.recipe_max_eu * i64::from(FE_PER_EU);
             let formed = if status.formed { "true" } else { "false" };
-            let hatches = be_hatch_kinds(&nbt).iter().flatten().count();
+            let kinds = be_hatch_kinds(&nbt);
+            let hatches = kinds.iter().flatten().count();
+            // The shell's hatch layout as the match recorded it: the kind at each
+            // hatchable position, so the readout names what the shell holds.
+            let names = chunk_names(&kinds);
             format!(
-                "{id} at {},{},{}: {}/{} FE ({} EU), progress {}/1000, {fe_per_tick} FE/t, formed {formed}, missing {}, hatches {hatches}, active {active}, t={now}",
+                "{id} at {},{},{}: {}/{} FE ({} EU), progress {}/1000, {fe_per_tick} FE/t, formed {formed}, missing {}, hatches {hatches} [{names}], active {active}, t={now}",
                 pos[0],
                 pos[1],
                 pos[2],
@@ -1246,6 +1394,20 @@ fn report(host: &mut dyn ServerHost, command: &CommandInvocation) {
                 eu,
                 status.progress_permille,
                 status.missing,
+            )
+        } else if let Some(kind) = energy_hatch_kind(base, entity) {
+            // An energy hatch's own buffer, at its tier's capacity; the harness
+            // control and the shell are the other two ways to see it.
+            let id = entity
+                .kind(base)
+                .map(|key| key.id(base))
+                .unwrap_or_default();
+            let capacity = kind.capacity_fe();
+            let energy = be_int(&nbt, "energy").clamp(0, capacity);
+            let eu = energy / FE_PER_EU;
+            format!(
+                "{id} at {},{},{}: {energy}/{capacity} FE ({eu} EU), t={now}",
+                pos[0], pos[1], pos[2],
             )
         } else {
             say(
@@ -1282,19 +1444,14 @@ fn set(host: &mut dyn ServerHost, command: &CommandInvocation, alter: Alter) {
     };
     let base: &dyn Host = host;
     let is_oven = oven_id(base, entity).is_some();
-    // `energy` fills either machine's buffer; `efficiency` is the macerator's overclock and the
-    // coke oven has none (upstream's steam tier caps its rate at its own 2 EU/t).
-    if machine_id(base, entity).is_none() && !is_oven {
+    let hatch = energy_hatch_kind(base, entity);
+    // `energy` fills either machine's buffer or an energy hatch's; `efficiency` is the
+    // macerator's overclock only (the coke oven has none — upstream's steam tier caps
+    // its rate at its own 2 EU/t — and a hatch has no run at all).
+    if machine_id(base, entity).is_none() && !is_oven && hatch.is_none() {
         say(
             host,
             "That block entity is not one of this port's machines; nothing was changed.",
-        );
-        return;
-    }
-    if is_oven && matches!(alter, Alter::Efficiency) {
-        say(
-            host,
-            "That block entity is not an electric macerator; nothing was changed.",
         );
         return;
     }
@@ -1302,10 +1459,29 @@ fn set(host: &mut dyn ServerHost, command: &CommandInvocation, alter: Alter) {
         say(host, "No block entity there.");
         return;
     };
+    if matches!(alter, Alter::Efficiency) && (is_oven || hatch.is_some()) {
+        say(
+            host,
+            "That block entity is not an electric macerator; nothing was changed.",
+        );
+        return;
+    }
     // Only the keys the control changes are merged, so the run in progress and any key another
     // mod keeps on this block entity stay as they are.
     let mut patch = Compound::new();
-    let after = if is_oven {
+    let after = if let Some(kind) = hatch {
+        match alter {
+            // An energy hatch's buffer is its tier's: the control fills it, and the
+            // tier's own capacity is what it can hold (`EnergyHatch`'s
+            // `30 * 20 * tier.eu`).
+            Alter::Energy => {
+                let after = amount.clamp(0, kind.capacity_fe());
+                patch.insert("energy".into(), Tag::Int(after));
+                after
+            }
+            Alter::Efficiency => 0,
+        }
+    } else if is_oven {
         let mut state = oven_state(&nbt);
         match alter {
             Alter::Energy => {
