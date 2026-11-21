@@ -1,4 +1,4 @@
-# Modern Industrialization for Horizon — the electric macerator and the coke oven
+# Modern Industrialization for Horizon — the electric macerator, the coke oven and its hatches
 
 A port of [Modern Industrialization](https://github.com/AztechMC/Modern-Industrialization) 2.5.12
 (MIT): the first machine of its electric age and the first of its multiblocks.
@@ -25,21 +25,34 @@ A port of [Modern Industrialization](https://github.com/AztechMC/Modern-Industri
 - the jar's own coke recipe: **1 coal → 1 coke at 2 EU/t for 600 ticks** (1,200 EU = 12,000 FE) —
   and it only runs while the shell is whole. Break one brick and the run pauses, exactly where it
   was and without burning anything; put the brick back and it resumes;
-- **two item slots** (one input, one output) and the same 32,000 FE buffer. Upstream feeds a
-  multiblock through hatches and stores steam, not EU; this slice carries the slots on the
-  controller and models the steam's 1 mB = 1 EU as FE at the mod's 10:1 ratio. `notes.md` records
-  the deviation;
+- the **four bronze hatches** — `bronze_item_input_hatch`, `bronze_item_output_hatch`,
+  `bronze_fluid_input_hatch`, `bronze_fluid_output_hatch` — each a block a shell position may hold
+  where the jar's `HatchFlags` allow it (the floor and roof layers; the middle ring is brick-only).
+  An item hatch holds one slot, a fluid hatch a 4,000 mB tank;
+- the **controller aggregates the hatches**: a run's input is pumped from the item input hatch into
+  the controller and its product is pumped out into the item output hatch, so a hopper or a pipe
+  feeds and drains the multiblock through the shell. The controller keeps the two internal slots as
+  its run buffer (upstream has none there; `notes.md` records the deviation) and models the steam's
+  1 mB = 1 EU as FE at the mod's 10:1 ratio;
 - the block, its blockstate, a port-authored model (bricks casing + the jar's front overlay), the
   **coke** and **coke dust** items, the lang keys, the self-drop loot table and the same
   `mineable/pickaxe` + `needs_stone_tool` tags, all in this package's `assets/` and `data/`.
 
+The multiblock companions an add-on builds with are registered too: `bronze_plated_bricks`, the
+`cupronickel_coil` and the `kanthal_coil` (each placed, read back and self-dropping), and the coke
+oven's recipes are a **data recipe kind** (`modern_industrialization:coke_oven`) under
+`data/modern_industrialization/recipe/coke_oven/`, which another mod reads with the SDK's
+`recipes_of_type` rather than from a compiled table.
+
 `/modern_industrialization info <pos>` reports a machine's buffer, progress, rate, efficiency, and
-for the multiblock its shell (`formed true|false, missing N`); `energy` and `efficiency` are the
-harness controls.
+for the multiblock its shell (`formed true|false, missing N, hatches N`); `recipes` lists the coke
+oven kind's recipes as another mod reads them; `shape <pos>` matches the matcher's 3×3×4 harness
+fixture (the add-on's shell: 17 bronze-plated bricks and 16 coil positions, two holding hatches);
+`energy` and `efficiency` are the harness controls.
 
 Everything else in the mod (the other machine families, the blast furnace and the rest of the
-multiblocks, the hatches, the generators, the pipes, the material part system, the tools and the
-GuideME book) is not ported; `notes.md` has the complete gap list.
+multiblocks, the energy hatches and the other tiers, the generators, the pipes, the material part
+system, the tools and the GuideME book) is not ported; `notes.md` has the complete gap list.
 
 ## The package
 
@@ -52,7 +65,7 @@ modern_industrialization.hmod
   src/lib.rs         the one #[mod_api::horizon_mod] impl Hooks: the two block entity types and
                      their Parts, the shape match (block_changed + level_tick_post), the
                      container and energy declarations, and the commands
-  src/runtime.rs     the port's pure logic, the shell template and its 41 tests
+  src/runtime.rs     the port's pure logic, the shell template, the hatch flags and its 50 tests
   assets/ data/      the carried content (blocks, items, models, textures, lang, loot, tags)
   LICENSE, LICENSE-NOTICE.md, data/modern_industrialization/license/
 ```

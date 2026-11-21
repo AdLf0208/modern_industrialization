@@ -1,11 +1,11 @@
-# Package receipt — modern_industrialization 0.2.1
+# Package receipt — modern_industrialization 0.2.2
 
 | field | value |
 |---|---|
-| version | `0.2.1` |
+| version | `0.2.2` |
 | file | `modern_industrialization.hmod` |
-| bytes | 62,560 |
-| sha256 | `7308bcf29c29cabca7def755bb99837a8617ffdb3813c10d4e658fd22dcd5289` |
+| bytes | 103,597 |
+| sha256 | `d2d388ce1932fbd94afeb75c2d804951692f992d0786c0596e41fddf22276ae7` |
 | source | this tag — the tree here is the source that produced the archive |
 | game | 26.3 |
 | horizon | `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` |

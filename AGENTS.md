@@ -32,5 +32,7 @@ editing. This port is **one flat SDK package** (mod API `0.2`, pin `0b14f8a`); t
   `.horizon/` are disposable. What sits in the package root ships, so `README.md` is user-facing.
 - Validate with `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`,
   then `cargo horizon-mod check`, `build`, `check <hmod>` and `fits <hmod>` through the runner, and
-  record the sha256 in `VALIDATION.md`. The in-game `tools/e2e.sh` leg is **retired** until a game
-  binary built from the pinned SDK exists (`notes.md` gap 3).
+  record the sha256 in `VALIDATION.md`. The in-game leg is live again: build the launcher game
+  (`ports/tools/launcher-game.sh build modern_industrialization`) and run `tools/e2e.sh` through
+  `build-slot.sh run --step e2e`; it honours `E2E_TMP` so its scratch world stays off the `/tmp`
+  tmpfs.

@@ -180,3 +180,56 @@ recipes as the data declares them.
 | `ShapeMatcher` rematches on block updates and caches | `block_changed` re-reads the 25 members of every controller the changed position can belong to | one write per change, no cached matcher to invalidate |
 | steel hatches overclock to 4 EU/t | 2 EU/t always | hatches not ported |
 | the GUI shows `Shape Valid` and the missing blocks on a wrench | `/modern_industrialization info` prints `formed true|false, missing N` | no menu |
+
+## Slice 3: the hatches, the casings and the recipe kind
+
+Read from tag 2.5.12 (`MultiblockMachines.cokeOven`, `ShapeTemplate`,
+`multiblocks/HatchFlags.java`, `HatchType`/`HatchTypes`, `init/MultiblockHatches.java`,
+`blockentities/hatches/{ItemHatch,FluidHatch}.java`, `HatchBlockEntity.java`,
+`materials/part/MIParts.java`, `materials/part/CasingPart.java`) and from the jar's
+`assets/modern_industrialization/{blockstates,models,textures}/*` and
+`data/modern_industrialization/loot_table/blocks/*`.
+
+### The hatches
+
+| Where | What it says |
+|---|---|
+| `MultiblockMachines.cokeOven` | `HatchFlags cokeOvenHatches = new HatchFlags.Builder().with(ITEM_INPUT).with(ITEM_OUTPUT).with(FLUID_INPUT).with(FLUID_OUTPUT).build()`; `add3by3Levels(-1, 1, bricks, cokeOvenHatches)` gives it to the floor and roof layers only |
+| `ShapeTemplate.Builder.add3by3`/`build` | the middle ring keeps `HatchFlags.NO_HATCH`; the controller's own position is removed, the interior `(0,0,1)` is hollow |
+| `HatchFlags` | a `Set<HatchType>` per position; `allows(type)` is the matcher's test |
+| `HatchTypes` | `item_input`, `item_output`, `fluid_input`, `fluid_output` are the four this slice ports; `energy_input`/`energy_output` are a separate tiered family (`lv`…`superconductor`), and `nuclear_item`/`nuclear_fluid`/`large_tank` are other machines' |
+| `MultiblockHatches.registerItemHatches("Bronze", "bronze", …, 1, 1, …)` | one input or output slot per bronze item hatch |
+| `MultiblockHatches.registerFluidHatches("Bronze", "bronze", …, 4)` | one 4-bucket (4,000 mB) tank per bronze fluid hatch |
+| `HatchBlockEntity.appendItemInputs/…Outputs/…FluidInputs/…FluidOutputs` | the hatches' storage **is** the multiblock inventory: the crafter reads all input hatches and writes all output hatches |
+| `HatchBlockEntity.unlink`/`link` | a hatch is machine-locked to the casing it matched; breaking the shell unlinks it |
+
+### The companions
+
+| Where | What it says |
+|---|---|
+| `MIParts.COIL` | `new PartTemplate("Coil", "coil").asColumnBlock(SortOrder.COILS)`; a column model (side + top textures), destroy time 5.0, resistance 6.0, mining level tag 1 |
+| `MIMaterials` | cupronickel and kanthal take `COIL`; the ids are `modern_industrialization:cupronickel_coil` / `…:kanthal_coil` |
+| `MIParts.MACHINE_CASING_SPECIAL` + `CasingPart` | `bronze_plated_bricks` is a casing block, destroy time 5.0, resistance 6.0, mining level 1 |
+| `industrialization_overdrive`'s `pyrolyse_oven_tier.json` | the coil block under/inside that shell selects batch 8 (cupronickel, cost ×1.0) or 32 (kanthal, ×0.75) — the data map the add-on ports, not this port |
+
+### The recipe kind
+
+The jar's `data/modern_industrialization/recipe/materials/coke_oven/{coke,coke_dust}.json` declare
+`"type": "modern_industrialization:coke_oven"`, `eu 2`, `duration 600`, one item input (`minecraft:coal`
+or `#c:dusts/coal`), one item output, and a 500 mB `creosote` fluid output at 50%. At this pin the SDK
+has a **mod-readable machine recipe kind**: `register_recipe_type` +
+`register_raw_recipe_serializer`, the files loaded from the package's `data/…/recipe/`, and
+`Host::recipes_of_type(id)` returning each recipe's id and JSON. That is what
+`industrialization_overdrive`'s pyrolyse oven needs to proxy the parent's coke recipes.
+
+### Where this slice's rewrite differs
+
+| Upstream | This port | Why |
+|---|---|---|
+| the controller has no inventory; the hatches are it | the controller keeps its two internal slots and the pump feeds/drains them from the hatches | the run's tick cannot read the level (slice 1, gap 2), so it cannot address a hatch directly; a recorded deviation |
+| item hatches have an `AutoExtract` component and a GUI toggle | the hatch's container capability is the automation path; no toggle | the machine GUI is not ported |
+| fluid hatches hold steam and the recipes consume it | the tank is declared, the recipes take no fluid (their data declares none), the creosote output is dropped | a mod fluid cannot live in a BE tank via `fluid_insert` at this pin (`enderstorage` gap) |
+| `tickTransfer` moves items/fluids with `autoInsert`/`autoExtract` | the controller's `level_tick_post` pump moves one stack a tick between the hatch and the run | the controller is the side that has the tick and the run |
+| the hatch model is the `modern_industrialization:machine` loader (casing + overlays) | a port-authored plain model with the jar's textures | the custom model loader is a client mod feature |
+| the energy hatches overclock the steam tier to 4 EU/t | not ported | a different, tiered family; the coke oven runs at 2 EU/t |
+| the shape includes the hatches in its `ShapeMatcher` cache | `block_changed` re-matches on any brick/hatch/controller change; the hatch layout is saved in `hatchKinds` | one write per change, no cache to invalidate |

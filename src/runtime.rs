@@ -970,6 +970,45 @@ pub const COKE_OVEN_BRICK: &str = "minecraft:bricks";
 /// air, stone or a machine there is the player's business.
 pub const COKE_OVEN_INTERIOR: [i32; 3] = [0, 0, 1];
 
+/// The bronze item input hatch: one input slot
+/// (`MultiblockHatches.BRONZE_ITEM`, `registerItemHatches(…, rows 1, columns 1,
+/// …)`).
+pub const BRONZE_ITEM_INPUT_HATCH: &str = "modern_industrialization:bronze_item_input_hatch";
+
+/// The bronze item output hatch: one output slot.
+pub const BRONZE_ITEM_OUTPUT_HATCH: &str = "modern_industrialization:bronze_item_output_hatch";
+
+/// The bronze fluid input hatch: one 4,000 mB tank (`registerFluidHatches(…, 4)`).
+pub const BRONZE_FLUID_INPUT_HATCH: &str = "modern_industrialization:bronze_fluid_input_hatch";
+
+/// The bronze fluid output hatch: one 4,000 mB tank.
+pub const BRONZE_FLUID_OUTPUT_HATCH: &str = "modern_industrialization:bronze_fluid_output_hatch";
+
+/// The bronze fluid hatch's tank, in millibuckets: upstream's
+/// `registerFluidHatches("Bronze", "bronze", …, 4)` is four buckets.
+pub const BRONZE_FLUID_HATCH_CAPACITY: i32 = 4 * 1_000;
+
+/// The bricked bronze casing block of the add-on's pyrolyse oven shell
+/// (`MIMaterials`' `MACHINE_CASING_SPECIAL.of("Bronze Plated Bricks", …)`).
+pub const BRONZE_PLATED_BRICKS: &str = "modern_industrialization:bronze_plated_bricks";
+
+/// The cupronickel coil block (`MIParts.COIL` for cupronickel; the add-on's
+/// `pyrolyse_oven_tier` data map keys batch 8 on it).
+pub const CUPRONICKEL_COIL: &str = "modern_industrialization:cupronickel_coil";
+
+/// The kanthal coil block (batch 32 in the add-on's data map).
+pub const KANTHAL_COIL: &str = "modern_industrialization:kanthal_coil";
+
+/// The hatch kinds the coke oven's end-layer positions accept: upstream's
+/// `HatchFlags.Builder().with(ITEM_INPUT).with(ITEM_OUTPUT).with(FLUID_INPUT)
+/// .with(FLUID_OUTPUT).build()`.
+pub const COKE_OVEN_HATCHES: &[HatchKind] = &[
+    HatchKind::ItemInput,
+    HatchKind::ItemOutput,
+    HatchKind::FluidInput,
+    HatchKind::FluidOutput,
+];
+
 /// The steam tier's EU a tick: `SteamCraftingMultiblockBlockEntity.getBaseRecipeEu`
 /// is `overclockComponent.getRecipeEu(steelHatches ? 4 : 2)` and `getMaxRecipeEu`
 /// returns the same, so a coke oven runs at exactly 2 EU/t (20 FE/t) with the
@@ -991,8 +1030,116 @@ pub const COKE_CAPACITY_FE: i32 = CAPACITY_FE;
 pub struct ShellMember {
     /// The position relative to the controller's own block.
     pub offset: [i32; 3],
-    /// The block id the position must hold.
+    /// The block id the position must hold when it holds no hatch.
     pub block: &'static str,
+    /// The hatch kinds this position may hold *instead of* `block` — upstream's
+    /// `HatchFlags` for the position. Empty means brick only.
+    pub hatches: &'static [HatchKind],
+}
+
+impl ShellMember {
+    /// A position that must hold the shell's own block: upstream's
+    /// `HatchFlags.NO_HATCH`.
+    const fn brick(offset: [i32; 3], block: &'static str) -> Self {
+        Self {
+            offset,
+            block,
+            hatches: &[],
+        }
+    }
+
+    /// A position that may hold any of the coke oven's hatch kinds.
+    const fn hatchable(offset: [i32; 3]) -> Self {
+        Self {
+            offset,
+            block: COKE_OVEN_BRICK,
+            hatches: COKE_OVEN_HATCHES,
+        }
+    }
+
+    /// Whether this position accepts `kind` instead of its own block.
+    #[must_use]
+    pub fn allows(&self, kind: HatchKind) -> bool {
+        self.hatches.contains(&kind)
+    }
+}
+
+/// A kind of hatch a multiblock position may hold: the four kinds the coke
+/// oven's `HatchFlags` allows and the five the add-on's 3×3×4 shell needs (its
+/// energy hatch is a later slice, `notes.md` 6a). Upstream's `HatchType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HatchKind {
+    /// An item hatch the multiblock takes its inputs from.
+    ItemInput,
+    /// An item hatch the multiblock puts its outputs into.
+    ItemOutput,
+    /// A fluid hatch the multiblock takes its inputs from.
+    FluidInput,
+    /// A fluid hatch the multiblock puts its outputs into.
+    FluidOutput,
+}
+
+impl HatchKind {
+    /// Every kind this slice ports, in upstream's registration order.
+    pub const ALL: [Self; 4] = [
+        Self::ItemInput,
+        Self::ItemOutput,
+        Self::FluidInput,
+        Self::FluidOutput,
+    ];
+
+    /// The block this kind is made of: the bronze hatch the jar registers.
+    #[must_use]
+    pub fn block(self) -> &'static str {
+        match self {
+            Self::ItemInput => BRONZE_ITEM_INPUT_HATCH,
+            Self::ItemOutput => BRONZE_ITEM_OUTPUT_HATCH,
+            Self::FluidInput => BRONZE_FLUID_INPUT_HATCH,
+            Self::FluidOutput => BRONZE_FLUID_OUTPUT_HATCH,
+        }
+    }
+
+    /// The kind a block id is, if it is one of this slice's hatches.
+    #[must_use]
+    pub fn from_block(block: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.block() == block)
+    }
+
+    /// The stable number this port saves in a controller's `hatchKinds`.
+    #[must_use]
+    pub fn code(self) -> i32 {
+        match self {
+            Self::ItemInput => 0,
+            Self::ItemOutput => 1,
+            Self::FluidInput => 2,
+            Self::FluidOutput => 3,
+        }
+    }
+
+    /// The kind a saved code is, if it is one.
+    #[must_use]
+    pub fn from_code(code: i32) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.code() == code)
+    }
+
+    /// Whether the hatch takes items or fluid out of the multiblock.
+    #[must_use]
+    pub fn is_item(self) -> bool {
+        matches!(self, Self::ItemInput | Self::ItemOutput)
+    }
+
+    /// Whether the hatch feeds the multiblock rather than draining it.
+    #[must_use]
+    pub fn is_input(self) -> bool {
+        matches!(self, Self::ItemInput | Self::FluidInput)
+    }
+}
+
+/// Whether a block id is any of this slice's hatches (a change of one can
+/// change a shell match, exactly as a brick's can).
+#[must_use]
+pub fn is_hatch(block: &str) -> bool {
+    HatchKind::from_block(block).is_some()
 }
 
 /// The coke oven's shell, exactly as tag 2.5.12 builds it:
@@ -1009,110 +1156,35 @@ pub struct ShellMember {
 /// middle layer is the controller and which extends two blocks to +z.
 pub const COKE_OVEN_SHELL: &[ShellMember] = &[
     // y = -1: the full 3x3 floor (upstream: hatchable, `add3by3(-1, …, false, …)`).
-    ShellMember {
-        offset: [-1, -1, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [0, -1, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, -1, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [-1, -1, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [0, -1, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, -1, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [-1, -1, 2],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [0, -1, 2],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, -1, 2],
-        block: COKE_OVEN_BRICK,
-    },
-    // y = 0: the ring around the hollow interior and the controller (7).
-    ShellMember {
-        offset: [-1, 0, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, 0, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [-1, 0, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, 0, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [-1, 0, 2],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [0, 0, 2],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, 0, 2],
-        block: COKE_OVEN_BRICK,
-    },
+    ShellMember::hatchable([-1, -1, 0]),
+    ShellMember::hatchable([0, -1, 0]),
+    ShellMember::hatchable([1, -1, 0]),
+    ShellMember::hatchable([-1, -1, 1]),
+    ShellMember::hatchable([0, -1, 1]),
+    ShellMember::hatchable([1, -1, 1]),
+    ShellMember::hatchable([-1, -1, 2]),
+    ShellMember::hatchable([0, -1, 2]),
+    ShellMember::hatchable([1, -1, 2]),
+    // y = 0: the ring around the hollow interior and the controller (7). The
+    // jar gives these positions `HatchFlags.NO_HATCH`: bricks only.
+    ShellMember::brick([-1, 0, 0], COKE_OVEN_BRICK),
+    ShellMember::brick([1, 0, 0], COKE_OVEN_BRICK),
+    ShellMember::brick([-1, 0, 1], COKE_OVEN_BRICK),
+    ShellMember::brick([1, 0, 1], COKE_OVEN_BRICK),
+    ShellMember::brick([-1, 0, 2], COKE_OVEN_BRICK),
+    ShellMember::brick([0, 0, 2], COKE_OVEN_BRICK),
+    ShellMember::brick([1, 0, 2], COKE_OVEN_BRICK),
     // y = 1: the full 3x3 roof (upstream: hatchable).
-    ShellMember {
-        offset: [-1, 1, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [0, 1, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, 1, 0],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [-1, 1, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [0, 1, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, 1, 1],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [-1, 1, 2],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [0, 1, 2],
-        block: COKE_OVEN_BRICK,
-    },
-    ShellMember {
-        offset: [1, 1, 2],
-        block: COKE_OVEN_BRICK,
-    },
+    ShellMember::hatchable([-1, 1, 0]),
+    ShellMember::hatchable([0, 1, 0]),
+    ShellMember::hatchable([1, 1, 0]),
+    ShellMember::hatchable([-1, 1, 1]),
+    ShellMember::hatchable([0, 1, 1]),
+    ShellMember::hatchable([1, 1, 1]),
+    ShellMember::hatchable([-1, 1, 2]),
+    ShellMember::hatchable([0, 1, 2]),
+    ShellMember::hatchable([1, 1, 2]),
 ];
-
 /// Whether a block change can change a coke oven's match: only a shell member's
 /// block or the controller's own block can, so a world full of leaf decay and
 /// water flow does not make the glue read 25 blocks per change.
@@ -1120,42 +1192,83 @@ pub const COKE_OVEN_SHELL: &[ShellMember] = &[
 pub fn shell_relevant(old: &str, new: &str) -> bool {
     [old, new]
         .iter()
-        .any(|id| *id == COKE_OVEN_BRICK || *id == COKE_OVEN_ID)
+        .any(|id| *id == COKE_OVEN_BRICK || *id == COKE_OVEN_ID || is_hatch(id))
 }
 
 /// The world as a shape match sees it: the block id at an absolute position.
+///
+/// The id is owned because not every source can borrow one: a command reads a
+/// [`crate::BlockState`] and formats its id, while `block_changed` already has
+/// the string. A match is 25 reads on a block update, never per tick, so the
+/// allocation is not on a hot path.
 pub trait Shell {
     /// The block at `pos`, or `None` where the level has none.
-    fn block_at(&self, pos: [i32; 3]) -> Option<&str>;
+    fn block_at(&self, pos: [i32; 3]) -> Option<String>;
 }
 
 /// What a shape match found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ShellMatch {
-    /// Whether every member holds its declared block.
+    /// Whether every member holds its declared block or an allowed hatch.
     pub formed: bool,
     /// How many members are wrong or missing (upstream's "missing blocks").
     pub missing: u8,
+    /// Every hatchable position that holds a hatch, and the kind it holds: the
+    /// per-position `Option<HatchKind>` the shell template's `HatchFlags`
+    /// resolves to. Saved in the controller's `hatchKinds`.
+    pub hatches: Vec<([i32; 3], HatchKind)>,
 }
 
-/// Matches [`COKE_OVEN_SHELL`] around the controller at `origin`.
+/// Whether the block at a member's position satisfies it: the member's own
+/// block, or a hatch whose kind the position's `HatchFlags` allows.
+fn member_holds(member: &ShellMember, block: Option<&str>) -> bool {
+    match block {
+        Some(id) if id == member.block => true,
+        Some(id) => HatchKind::from_block(id).is_some_and(|kind| member.allows(kind)),
+        None => false,
+    }
+}
+
+/// Matches `members` around the controller at `origin`.
 #[must_use]
-pub fn match_shell(shell: &dyn Shell, origin: [i32; 3]) -> ShellMatch {
+pub fn match_shell(shell: &dyn Shell, origin: [i32; 3], members: &[ShellMember]) -> ShellMatch {
     let mut missing = 0;
-    for member in COKE_OVEN_SHELL {
+    let mut hatches = Vec::new();
+    for member in members {
         let pos = [
             origin[0] + member.offset[0],
             origin[1] + member.offset[1],
             origin[2] + member.offset[2],
         ];
-        if shell.block_at(pos) != Some(member.block) {
+        let block = shell.block_at(pos);
+        if !member_holds(member, block.as_deref()) {
             missing += 1;
+            continue;
+        }
+        if members_hatch_position(member)
+            && let Some(kind) = block.as_deref().and_then(HatchKind::from_block)
+        {
+            hatches.push((member.offset, kind));
         }
     }
     ShellMatch {
         formed: missing == 0,
         missing,
+        hatches,
     }
+}
+
+/// Whether a position accepts hatches at all (upstream's `hatchFlags` map).
+fn members_hatch_position(member: &ShellMember) -> bool {
+    !member.hatches.is_empty()
+}
+
+/// The coke oven's hatchable positions, in the order its controller saves their
+/// kinds (`hatchKinds`).
+pub fn hatch_members() -> impl Iterator<Item = &'static ShellMember> {
+    COKE_OVEN_SHELL
+        .iter()
+        .filter(|member| members_hatch_position(member))
 }
 
 /// What a coke oven saves, so a reload resumes its run and its shape.
@@ -1397,6 +1510,93 @@ pub const COKE_RECIPES: &[MachineRecipe] = &[
         duration: 600,
     },
 ];
+
+// ---------------------------------------------------------------------------
+// Slice 3: hatches, casings and the mod-readable coke recipe kind
+// ---------------------------------------------------------------------------
+
+/// The coke oven's recipe kind, registered with the game and read by another
+/// mod through `recipes_of_type`: upstream's `MIMachineRecipeTypes.COKE_OVEN`
+/// serializes under `modern_industrialization:coke_oven`. The machine's table
+/// stays [`COKE_RECIPES`]; the shipped `data/modern_industrialization/recipe/
+/// coke_oven/` files are the same two runs in the kind another mod can read,
+/// and a test pins the two together.
+pub const COKE_RECIPE_KIND: &str = "modern_industrialization:coke_oven";
+
+/// The shipped recipe files of [`COKE_RECIPE_KIND`], as the package's
+/// `data/modern_industrialization/recipe/coke_oven/` carries them.
+pub const COKE_RECIPE_FILES: &[(&str, &str)] = &[
+    (
+        "modern_industrialization:coke_oven/coke",
+        include_str!("../data/modern_industrialization/recipe/coke_oven/coke.json"),
+    ),
+    (
+        "modern_industrialization:coke_oven/coke_dust",
+        include_str!("../data/modern_industrialization/recipe/coke_oven/coke_dust.json"),
+    ),
+];
+
+/// How many of `source` a move into `target` lifts: a whole stack into an empty
+/// slot, the free room into a stack of the same item, nothing into another
+/// item or a full slot. This is the item hatch's pump half — the controller
+/// has the other half (`CrafterComponent`'s slots) — and it is pure so the
+/// arithmetic is tested without a world.
+#[must_use]
+pub fn merge_count(source: (&str, u32), target: Option<(&str, u32)>, stack_size: u32) -> u32 {
+    let (item, count) = source;
+    match target {
+        Some((held, amount)) if held == item => stack_size.saturating_sub(amount).min(count),
+        Some(_) => 0,
+        None => stack_size.min(count),
+    }
+}
+
+/// The add-on `industrialization_overdrive`'s pyrolyse oven shell, as its
+/// parent-surface matrix describes it: a 3×3×4 box of 33 members — 17
+/// `bronze_plated_bricks`, then 16 coil positions of which the two roof corners
+/// may hold a hatch — around a controller with two interior blocks.
+///
+/// It is a **harness fixture**: the add-on owns the controller and declares its
+/// own template; this port owns the matcher, the blocks and the hatch kinds, and
+/// `/modern_industrialization shape` matches this template in game so the 3×3×4
+/// case is proven before the add-on's slice exists.
+#[must_use]
+pub fn pyrolyse_shape_fixture() -> Vec<ShellMember> {
+    let mut offsets = Vec::new();
+    for y in 0..4 {
+        for z in 0..3 {
+            for x in -1..=1 {
+                if [x, y, z] == [0, 0, 0] || [x, y, z] == [0, 0, 1] || [x, y, z] == [0, 0, 2] {
+                    continue; // the controller and its two interior blocks
+                }
+                offsets.push([x, y, z]);
+            }
+        }
+    }
+    debug_assert_eq!(
+        offsets.len(),
+        33,
+        "3 x 3 x 4 minus a controller and 2 interior"
+    );
+    let hatchable = [[-1, 3, 0], [1, 3, 2]];
+    offsets
+        .into_iter()
+        .enumerate()
+        .map(|(index, offset)| ShellMember {
+            offset,
+            block: if index < 17 {
+                BRONZE_PLATED_BRICKS
+            } else {
+                CUPRONICKEL_COIL
+            },
+            hatches: if hatchable.contains(&offset) {
+                COKE_OVEN_HATCHES
+            } else {
+                &[]
+            },
+        })
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -1976,6 +2176,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// A shell as the game would answer it: absolute position to block id.
+    #[derive(Clone)]
     struct ShellBench {
         blocks: Vec<([i32; 3], &'static str)>,
     }
@@ -1983,8 +2184,14 @@ mod tests {
     impl ShellBench {
         /// The controller at `origin` standing in a complete shell of bricks.
         fn complete(origin: [i32; 3]) -> Self {
+            Self::complete_with(origin, COKE_OVEN_SHELL)
+        }
+
+        /// The controller at `origin` standing in `members`, each holding its
+        /// declared block.
+        fn complete_with(origin: [i32; 3], members: &[ShellMember]) -> Self {
             Self {
-                blocks: COKE_OVEN_SHELL
+                blocks: members
                     .iter()
                     .map(|member| {
                         (
@@ -2013,11 +2220,11 @@ mod tests {
     }
 
     impl Shell for ShellBench {
-        fn block_at(&self, pos: [i32; 3]) -> Option<&str> {
+        fn block_at(&self, pos: [i32; 3]) -> Option<String> {
             self.blocks
                 .iter()
                 .find(|(at, _)| *at == pos)
-                .map(|(_, block)| *block)
+                .map(|(_, block)| (*block).to_owned())
         }
     }
 
@@ -2062,14 +2269,14 @@ mod tests {
 
     #[test]
     fn a_shell_of_bricks_forms_the_coke_oven() {
-        let matched = match_shell(&shelf(), [0, 0, 0]);
+        let matched = match_shell(&shelf(), [0, 0, 0], COKE_OVEN_SHELL);
         assert!(matched.formed, "{matched:?}");
         assert_eq!(matched.missing, 0);
     }
 
     #[test]
     fn one_missing_brick_leaves_the_coke_oven_unformed() {
-        let matched = match_shell(&shelf().without([1, 1, 2]), [0, 0, 0]);
+        let matched = match_shell(&shelf().without([1, 1, 2]), [0, 0, 0], COKE_OVEN_SHELL);
         assert!(!matched.formed);
         assert_eq!(matched.missing, 1);
     }
@@ -2080,6 +2287,7 @@ mod tests {
         let matched = match_shell(
             &shelf().with([-1, -1, 0], "modern_industrialization:electric_macerator"),
             [0, 0, 0],
+            COKE_OVEN_SHELL,
         );
         assert!(!matched.formed);
         assert_eq!(matched.missing, 1);
@@ -2092,15 +2300,15 @@ mod tests {
         let mut bench = shelf();
         bench.blocks.push((COKE_OVEN_INTERIOR, "minecraft:stone"));
         bench.blocks.push(([0, 0, 0], COKE_OVEN_ID));
-        let matched = match_shell(&bench, [0, 0, 0]);
+        let matched = match_shell(&bench, [0, 0, 0], COKE_OVEN_SHELL);
         assert!(matched.formed, "{matched:?}");
     }
 
     #[test]
     fn the_match_is_relative_to_the_controller() {
         let bench = ShellBench::complete([10, 100, -4]);
-        assert!(match_shell(&bench, [10, 100, -4]).formed);
-        assert!(!match_shell(&bench, [0, 0, 0]).formed);
+        assert!(match_shell(&bench, [10, 100, -4], COKE_OVEN_SHELL).formed);
+        assert!(!match_shell(&bench, [0, 0, 0], COKE_OVEN_SHELL).formed);
     }
 
     #[test]
@@ -2122,6 +2330,14 @@ mod tests {
         assert!(
             shell_relevant("minecraft:air", COKE_OVEN_ID),
             "the controller comes"
+        );
+        assert!(
+            shell_relevant(BRONZE_ITEM_INPUT_HATCH, "minecraft:air"),
+            "a hatch goes"
+        );
+        assert!(
+            shell_relevant("minecraft:air", BRONZE_FLUID_OUTPUT_HATCH),
+            "a hatch comes"
         );
         assert!(!shell_relevant("minecraft:stone", "minecraft:gravel"));
         assert!(!shell_relevant("minecraft:air", "minecraft:water"));
@@ -2252,6 +2468,234 @@ mod tests {
         }
         assert_eq!(oven.energy, 20_000);
         assert_eq!(oven.active, None);
+    }
+
+    #[test]
+    fn the_coke_ovens_hatch_flags_are_upstreams_two_end_layers() {
+        // `add3by3Levels(-1, 1, bricks, cokeOvenHatches)` flags the floor and the
+        // roof; the middle ring keeps `HatchFlags.NO_HATCH`.
+        let hatchable: Vec<_> = COKE_OVEN_SHELL
+            .iter()
+            .filter(|member| !member.hatches.is_empty())
+            .collect();
+        assert_eq!(hatchable.len(), 18, "9 floor + 9 roof positions");
+        assert!(
+            hatchable
+                .iter()
+                .all(|member| member.offset[1] != 0 && member.hatches == COKE_OVEN_HATCHES)
+        );
+        assert_eq!(
+            COKE_OVEN_SHELL
+                .iter()
+                .filter(|member| member.offset[1] == 0 && member.hatches.is_empty())
+                .count(),
+            7,
+            "the middle ring is brick-only"
+        );
+        assert_eq!(HatchKind::ALL.len(), 4);
+        assert_eq!(COKE_OVEN_HATCHES.len(), 4);
+    }
+
+    #[test]
+    fn an_allowed_hatch_forms_the_coke_oven_and_is_recorded() {
+        let bench = shelf()
+            .with([-1, -1, 0], BRONZE_ITEM_INPUT_HATCH)
+            .with([1, 1, 2], BRONZE_ITEM_OUTPUT_HATCH);
+        let matched = match_shell(&bench, [0, 0, 0], COKE_OVEN_SHELL);
+        assert!(matched.formed, "{matched:?}");
+        assert_eq!(matched.missing, 0);
+        assert_eq!(
+            matched.hatches,
+            vec![
+                ([-1, -1, 0], HatchKind::ItemInput),
+                ([1, 1, 2], HatchKind::ItemOutput),
+            ],
+            "the per-position hatch kinds are the layout the controller saves"
+        );
+    }
+
+    #[test]
+    fn a_hatch_in_a_brick_only_position_does_not_form() {
+        // (1, 0, 0) is in the middle ring, which the jar gives no hatch flags.
+        let bench = shelf().with([1, 0, 0], BRONZE_FLUID_INPUT_HATCH);
+        let matched = match_shell(&bench, [0, 0, 0], COKE_OVEN_SHELL);
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1);
+    }
+
+    #[test]
+    fn a_hatch_whose_kind_the_position_does_not_allow_does_not_form() {
+        // A template that allows only an item input at its one hatch position,
+        // as the jar's other shapes do (the steam boiler takes no item output).
+        const ALLOWED: &[HatchKind] = &[HatchKind::ItemInput];
+        let members = [
+            ShellMember {
+                offset: [0, 1, 0],
+                block: COKE_OVEN_BRICK,
+                hatches: ALLOWED,
+            },
+            ShellMember {
+                offset: [0, 2, 0],
+                block: COKE_OVEN_BRICK,
+                hatches: &[],
+            },
+        ];
+        let allowed =
+            ShellBench::complete_with([0, 0, 0], &members).with([0, 1, 0], BRONZE_ITEM_INPUT_HATCH);
+        assert!(match_shell(&allowed, [0, 0, 0], &members).formed);
+        let refused = ShellBench::complete_with([0, 0, 0], &members)
+            .with([0, 1, 0], BRONZE_ITEM_OUTPUT_HATCH);
+        let matched = match_shell(&refused, [0, 0, 0], &members);
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1, "an item output is not allowed here");
+    }
+
+    #[test]
+    fn a_coil_where_a_brick_belongs_does_not_form() {
+        let bench = shelf().with([-1, -1, 0], CUPRONICKEL_COIL);
+        let matched = match_shell(&bench, [0, 0, 0], COKE_OVEN_SHELL);
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1);
+        let bench = shelf().with([-1, -1, 0], KANTHAL_COIL);
+        assert!(!match_shell(&bench, [0, 0, 0], COKE_OVEN_SHELL).formed);
+    }
+
+    #[test]
+    fn the_three_by_three_by_four_add_on_shell_matches() {
+        let members = pyrolyse_shape_fixture();
+        let bricks = members
+            .iter()
+            .filter(|member| member.block == BRONZE_PLATED_BRICKS)
+            .count();
+        let coils = members
+            .iter()
+            .filter(|member| member.block == CUPRONICKEL_COIL)
+            .count();
+        assert_eq!((bricks, coils), (17, 16), "the add-on's 33-member shell");
+        let hatchable: Vec<_> = members
+            .iter()
+            .filter(|member| !member.hatches.is_empty())
+            .map(|member| member.offset)
+            .collect();
+        assert_eq!(hatchable.len(), 2);
+
+        // 17 bricks, 16 coils: the matcher accepts a mixed shell.
+        let complete = ShellBench::complete_with([0, 0, 0], &members);
+        let matched = match_shell(&complete, [0, 0, 0], &members);
+        assert!(matched.formed, "{matched:?}");
+        assert_eq!(matched.missing, 0);
+
+        // Two of the coil positions hold an item hatch and a fluid hatch.
+        let with_hatches = complete
+            .clone()
+            .with(hatchable[0], BRONZE_ITEM_INPUT_HATCH)
+            .with(hatchable[1], BRONZE_FLUID_INPUT_HATCH);
+        let matched = match_shell(&with_hatches, [0, 0, 0], &members);
+        assert!(matched.formed, "{matched:?}");
+        assert_eq!(matched.hatches.len(), 2);
+
+        // One coil broken: one member missing, and it unforms.
+        let broken = complete.clone().without([1, 2, 0]);
+        let matched = match_shell(&broken, [0, 0, 0], &members);
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1);
+
+        // A brick where a coil belongs is still unformed.
+        let wrong = complete.clone().with([1, 2, 0], BRONZE_PLATED_BRICKS);
+        let matched = match_shell(&wrong, [0, 0, 0], &members);
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1);
+
+        // A hatch at a coil position that allows none is unformed too.
+        let refused = complete.with([1, 2, 0], BRONZE_ITEM_OUTPUT_HATCH);
+        let matched = match_shell(&refused, [0, 0, 0], &members);
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1);
+    }
+
+    #[test]
+    fn the_hatch_kinds_are_upstreams_four_blocks() {
+        assert_eq!(HatchKind::ItemInput.block(), BRONZE_ITEM_INPUT_HATCH);
+        assert_eq!(HatchKind::ItemOutput.block(), BRONZE_ITEM_OUTPUT_HATCH);
+        assert_eq!(HatchKind::FluidInput.block(), BRONZE_FLUID_INPUT_HATCH);
+        assert_eq!(HatchKind::FluidOutput.block(), BRONZE_FLUID_OUTPUT_HATCH);
+        for kind in HatchKind::ALL {
+            assert_eq!(HatchKind::from_block(kind.block()), Some(kind));
+            assert_eq!(HatchKind::from_code(kind.code()), Some(kind));
+            assert!(is_hatch(kind.block()));
+        }
+        assert_eq!(HatchKind::from_block("minecraft:bricks"), None);
+        assert!(HatchKind::ItemInput.is_item() && HatchKind::ItemInput.is_input());
+        assert!(HatchKind::ItemOutput.is_item() && !HatchKind::ItemOutput.is_input());
+        assert!(!HatchKind::FluidOutput.is_item());
+    }
+
+    #[test]
+    fn an_item_hatch_moves_a_whole_stack_and_respects_its_room() {
+        assert_eq!(merge_count(("minecraft:coal", 3), None, 64), 3);
+        assert_eq!(
+            merge_count(("minecraft:coal", 100), None, 64),
+            64,
+            "one stack"
+        );
+        assert_eq!(
+            merge_count(("minecraft:coal", 5), Some(("minecraft:coal", 62)), 64),
+            2,
+            "the target's last two"
+        );
+        assert_eq!(
+            merge_count(("minecraft:coal", 5), Some(("minecraft:coke", 1)), 64),
+            0,
+            "another item does not mix"
+        );
+        assert_eq!(
+            merge_count(("minecraft:coal", 5), Some(("minecraft:coal", 64)), 64),
+            0,
+            "a full slot takes nothing"
+        );
+        assert_eq!(merge_count(("minecraft:coal", 0), None, 64), 0);
+    }
+
+    #[test]
+    fn the_shipped_coke_recipe_data_is_the_kind_another_mod_reads() {
+        // The jar's two files, shipped under `data/modern_industrialization/
+        // recipe/coke_oven/` and registered as a mod-readable recipe type; the
+        // machine's table stays `COKE_RECIPES`, and this pins the two together
+        // so the data and the run cannot drift apart.
+        assert_eq!(COKE_RECIPE_FILES.len(), 2);
+        let compact = |json: &str| -> String {
+            json.chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+        };
+        for (id, json) in COKE_RECIPE_FILES {
+            let text = compact(json);
+            assert!(
+                id.starts_with("modern_industrialization:coke_oven/"),
+                "{id} is a coke oven recipe file"
+            );
+            assert!(
+                text.contains(r#""type":"modern_industrialization:coke_oven""#),
+                "{id} names the registered kind: {text}"
+            );
+            assert!(text.contains(r#""eu":2"#), "{id} is 2 EU/t");
+            assert!(text.contains(r#""duration":600"#), "{id} is 600 ticks");
+        }
+        let coke = compact(COKE_RECIPE_FILES[0].1);
+        assert!(coke.contains(r#""item":"minecraft:coal""#));
+        assert!(coke.contains(r#""item":"modern_industrialization:coke""#));
+        let dust = compact(COKE_RECIPE_FILES[1].1);
+        assert!(dust.contains(r#""tag":"c:dusts/coal""#));
+        assert!(dust.contains(r#""item":"modern_industrialization:coke_dust""#));
+        // The table's first row is the coal run, the second the coal-dust run.
+        assert_eq!(COKE_RECIPES[0].inputs[0].item, "minecraft:coal");
+        assert_eq!(
+            COKE_RECIPES[1].inputs[0].item,
+            "modern_industrialization:coal_dust"
+        );
+        assert_eq!(COKE_RECIPES[0].eu, 2);
+        assert_eq!(COKE_RECIPES[0].duration, 600);
+        assert_eq!(COKE_RECIPE_KIND, "modern_industrialization:coke_oven");
     }
 
     #[test]

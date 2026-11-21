@@ -1,6 +1,13 @@
 {
   "values": [
     "modern_industrialization:electric_macerator",
-    "modern_industrialization:coke_oven"
+    "modern_industrialization:coke_oven",
+    "modern_industrialization:bronze_item_input_hatch",
+    "modern_industrialization:bronze_item_output_hatch",
+    "modern_industrialization:bronze_fluid_input_hatch",
+    "modern_industrialization:bronze_fluid_output_hatch",
+    "modern_industrialization:bronze_plated_bricks",
+    "modern_industrialization:cupronickel_coil",
+    "modern_industrialization:kanthal_coil"
   ]
 }

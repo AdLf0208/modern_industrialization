@@ -31,19 +31,20 @@ pub mod runtime;
 use std::sync::{Mutex, MutexGuard};
 
 use mod_api::{
-    self, BlockChangedEvent, BlockEntityEvent, BlockEntityPart, BlockEntityRef,
-    BlockEntityTickEvent, BlockEntityTickReply, BlockEntityTicksEvent, BlockPart, Command,
-    CommandArgumentValue, CommandInvocation, Compound, Flow, Hooks, Host, HostSide, Identifier,
-    ItemKey, ItemStack, LevelHost, LevelSide, LevelTickPostEvent, ModContainer, ModEnergyBuffer,
-    RegisterCommandsEvent, Registrar, RegistrationContext, RunModCommandEvent, ServerHost, Tag,
-    Text,
+    self, BlockChangedEvent, BlockEntityEvent, BlockEntityOnLoadEvent, BlockEntityPart,
+    BlockEntityRef, BlockEntityTickEvent, BlockEntityTickReply, BlockEntityTicksEvent, BlockPart,
+    Command, CommandArgumentValue, CommandInvocation, Compound, Flow, Hooks, Host, HostSide,
+    Identifier, ItemKey, ItemStack, LevelHost, LevelRef, LevelSide, LevelTickPostEvent,
+    ModContainer, ModEnergyBuffer, ModFluidTanks, RegisterCommandsEvent, Registrar,
+    RegistrationContext, RunModCommandEvent, ServerHost, Tag, Text, Transaction,
 };
 
 use runtime::{
-    CAPACITY_FE, COKE_CAPACITY_FE, COKE_OVEN_ID, COKE_OVEN_SHELL, CokeOven, FE_PER_EU,
-    MACERATOR_ID, Macerator, MachineRecipe, OUTPUT_SLOTS, OvenSaved, PROBABILITY_SCALE, STACK_SIZE,
-    Saved, Shell, ShellMatch, Slots, Status, coke_recipe, is_coke_oven, is_macerator, match_shell,
-    recipe, shell_relevant,
+    BRONZE_FLUID_HATCH_CAPACITY, CAPACITY_FE, COKE_CAPACITY_FE, COKE_OVEN_ID, COKE_OVEN_SHELL,
+    COKE_RECIPE_KIND, CokeOven, FE_PER_EU, HatchKind, MACERATOR_ID, Macerator, MachineRecipe,
+    OUTPUT_SLOTS, OvenSaved, PROBABILITY_SCALE, STACK_SIZE, Saved, Shell, ShellMatch, Slots,
+    Status, coke_recipe, hatch_members, is_coke_oven, is_macerator, match_shell, merge_count,
+    pyrolyse_shape_fixture, recipe, shell_relevant,
 };
 
 /// The item input slot (`MachineRecipeType.MACERATOR.withItemInputs()`).
@@ -62,13 +63,15 @@ const ENTITY_TYPE: &str = "electric_macerator";
 /// The coke oven's block entity type: the controller block's own name.
 const COKE_ENTITY_TYPE: &str = "coke_oven";
 
-/// The coke oven's item input slot. Upstream feeds the multiblock through an item
-/// input hatch; the hatch model is not ported, so the controller carries the input
-/// and its output (recorded in `notes.md`).
+/// The coke oven's item input slot: the run buffer the input hatch feeds.
 const COKE_INPUT: usize = 0;
 
-/// The coke oven's item output slot.
+/// The coke oven's item output slot: the run buffer the output hatch drains.
 const COKE_OUTPUT: usize = 1;
+
+/// The same two slots as the item-slot API takes them.
+const COKE_INPUT_SLOT: u32 = 0;
+const COKE_OUTPUT_SLOT: u32 = 1;
 
 /// The coke oven's slots in all.
 const COKE_SLOTS: usize = COKE_OUTPUT + 1;
@@ -126,6 +129,10 @@ impl Hooks for Mod {
             .blocks(&[COKE_ENTITY_TYPE])
             .build();
         let _ = r.block_entity_part(&oven_kind, CokeOvenPart);
+        // The controller's two slots stay its internal run buffer, as slice 2
+        // left them; the hatches are what the shell adds, and `pump_hatches`
+        // feeds and drains these slots from them. Upstream has no controller
+        // inventory at all, so the buttons are a recorded deviation (notes.md).
         r.block_container(
             &oven,
             ModContainer {
@@ -149,6 +156,54 @@ impl Hooks for Mod {
                 extract_faces: [false; 6],
             },
         );
+
+        // The four bronze hatches: each is a block a shell position may hold, with
+        // one item slot or one 4,000 mB tank (`MultiblockHatches.BRONZE_ITEM` /
+        // `BRONZE_FLUID`). The hatch block entity ticks only to materialise its
+        // storage once (the `Changed` trap slice 1 records), and the controller's
+        // `level_tick_post` pump moves items between it and the run.
+        for kind in HatchKind::ALL {
+            let id = kind.block();
+            let path = id.strip_prefix("modern_industrialization:").unwrap_or(id);
+            let hatch = r.block_key(id);
+            let hatch_kind = r.block_entity_type(path).blocks(&[path]).build();
+            let _ = r.block_entity_part(
+                &hatch_kind,
+                HatchPart {
+                    items: kind.is_item(),
+                },
+            );
+            if kind.is_item() {
+                r.block_container(
+                    &hatch,
+                    ModContainer {
+                        slots: 1,
+                        faces: std::array::from_fn(|_| vec![0]),
+                        inputs: if kind.is_input() { vec![0] } else { Vec::new() },
+                        outputs: if kind.is_input() { Vec::new() } else { vec![0] },
+                        menu: None,
+                    },
+                );
+            } else {
+                // Upstream's fluid hatch holds four buckets; the pin keeps a mod
+                // fluid's amount in the saved `fluids`, which the harness cannot
+                // fill (recorded in `notes.md`), so the tank is declared and the
+                // coke oven's recipes take no fluid input.
+                let mut tanks = ModFluidTanks::default();
+                tanks.tanks = vec![BRONZE_FLUID_HATCH_CAPACITY];
+                tanks.faces = std::array::from_fn(|_| vec![0]);
+                tanks.inputs = if kind.is_input() { vec![0] } else { Vec::new() };
+                tanks.outputs = if kind.is_input() { Vec::new() } else { vec![0] };
+                r.block_fluids(&hatch, tanks);
+            }
+        }
+
+        // The coke oven's recipe kind, readable by another mod: the two files
+        // under `data/modern_industrialization/recipe/coke_oven/` load against
+        // this type, and `Host::recipes_of_type` gives their ids and JSON to any
+        // mod that asks (the add-on's `PyrolyseOvenRecipeType` proxies it).
+        r.register_recipe_type(COKE_RECIPE_KIND);
+        r.register_raw_recipe_serializer(COKE_RECIPE_KIND, COKE_RECIPE_KIND);
     }
 
     /// `/modern_industrialization info|energy|efficiency`: the readout and the harness controls.
@@ -163,6 +218,14 @@ impl Hooks for Mod {
         event.commands.push(Command::op(
             "modern_industrialization efficiency <amount:integer> <pos:block_pos>",
             2,
+        ));
+        // The mod-readable recipe kind, and the matcher's 3×3×4 harness check:
+        // read-only additions (upstream has neither), recorded in `notes.md`.
+        event
+            .commands
+            .push(Command::new("modern_industrialization recipes"));
+        event.commands.push(Command::new(
+            "modern_industrialization shape <pos:block_pos>",
         ));
     }
 
@@ -188,6 +251,14 @@ impl Hooks for Mod {
             }
             Some("efficiency") => {
                 set(host, event.command, Alter::Efficiency);
+                Flow::Cancel
+            }
+            Some("recipes") => {
+                list_recipes(host);
+                Flow::Cancel
+            }
+            Some("shape") => {
+                match_shape(host, event.command);
                 Flow::Cancel
             }
             _ => Flow::Continue,
@@ -224,7 +295,7 @@ impl Hooks for Mod {
             if level_block(level, controller) != Some(COKE_OVEN_ID) {
                 continue;
             }
-            let matched = match_shell(&LevelShell { level }, controller);
+            let matched = match_shell(&LevelShell { level }, controller, COKE_OVEN_SHELL);
             queue_match(dimension, controller, matched);
         }
     }
@@ -264,13 +335,32 @@ impl Hooks for Mod {
                 }
                 continue;
             };
+            // `hatchKinds` is the per-position `Option<HatchKind>` the match
+            // resolved: the controller's pump reads it in the block-entity tick,
+            // which has no level to read the shell from.
+            let codes = hatch_codes(&entry.hatches);
+            let saved = match nbt.get(&"hatchKinds".into()) {
+                Some(Tag::IntArray(values)) => values.clone(),
+                _ => Vec::new(),
+            };
             if be_int(&nbt, "formed") != i32::from(entry.formed)
                 || be_int(&nbt, "shellMissing") != i32::from(entry.missing)
+                || saved != codes
             {
                 let mut patch = Compound::new();
                 patch.insert("formed".into(), Tag::Int(i32::from(entry.formed)));
                 patch.insert("shellMissing".into(), Tag::Int(i32::from(entry.missing)));
+                patch.insert("hatchKinds".into(), Tag::IntArray(codes));
                 let _ = entity.merge_data(host, patch);
+            }
+            set_formed(&dimension, entry.pos, entry.formed);
+        }
+        // Every formed controller pumps its hatches once a tick: the crafter's
+        // input and output slots are internal, and the shell's hatches are the
+        // inventory a hopper, a pipe or a player reaches.
+        for pos in formed_in(&dimension) {
+            if !pump_hatches(host, event.level, pos) {
+                set_formed(&dimension, pos, false);
             }
         }
     }
@@ -374,6 +464,29 @@ impl BlockEntityPart for CokeOvenPart {
         event.ticks = true;
     }
 
+    /// A loaded controller that saved `formed` rejoins the pump list: a world
+    /// reload fires no `block_changed`, so without this the hatches of an oven
+    /// that was already built would stop moving items after a restart.
+    fn block_entity_on_load(&self, host: HostSide<'_>, event: &mut BlockEntityOnLoadEvent) {
+        let HostSide::Server(host) = host else {
+            return;
+        };
+        let base: &dyn Host = &*host;
+        let (Some(level), Some(pos), Some(nbt)) = (
+            event.entity.level(base),
+            event.entity.position(base),
+            event.entity.data(base),
+        ) else {
+            return;
+        };
+        let Some(dimension) = level.dimension().id(base) else {
+            return;
+        };
+        if be_int(&nbt, "formed") != 0 {
+            set_formed(&dimension, pos, true);
+        }
+    }
+
     /// One tick of the oven: the same `CrafterComponent` step as the macerator's, at the steam
     /// tier's fixed 2 EU/t, and only while the shell matches.
     fn block_entity_tick(&self, host: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
@@ -406,6 +519,45 @@ impl BlockEntityPart for CokeOvenPart {
         if tick.active || tick.crafted.is_some() || state != before {
             store_oven(&mut fields.nbt, &state);
         } else if fresh {
+            *event.reply = BlockEntityTickReply::Unchanged;
+        }
+    }
+}
+
+/// A bronze hatch's block entity Part. It runs no behaviour of its own: it ticks
+/// only so its storage is materialised once (`items` for an item hatch, the
+/// saved `fluids` for a fluid one), which the engine does on a tick that answers
+/// `Changed` (slice 1's trap). The controller's pump does the transfer.
+struct HatchPart {
+    /// Whether this hatch has an item slot (the item hatches) or a fluid tank.
+    items: bool,
+}
+
+#[mod_api::horizon_part]
+impl BlockPart for HatchPart {}
+
+#[mod_api::horizon_part]
+impl BlockEntityPart for HatchPart {
+    fn block_entity(
+        &self,
+        _level: LevelSide,
+        _event: &mut BlockEntityEvent<'_>,
+    ) -> Option<Compound> {
+        Some(Compound::new())
+    }
+
+    fn block_entity_ticks(&self, _host: &dyn Host, event: &mut BlockEntityTicksEvent<'_>) {
+        event.ticks = true;
+    }
+
+    fn block_entity_tick(&self, _host: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
+        let fields = &mut *event.entity;
+        if fields.data.is_empty() {
+            fields.data = vec![SLOTS_READY];
+            if self.items && fields.items.is_empty() {
+                fields.items.resize(1, None);
+            }
+        } else {
             *event.reply = BlockEntityTickReply::Unchanged;
         }
     }
@@ -646,6 +798,8 @@ struct PendingMatch {
     formed: bool,
     /// How many members were wrong or missing.
     missing: u8,
+    /// Every hatchable position that holds a hatch, and the kind it holds.
+    hatches: Vec<([i32; 3], HatchKind)>,
     /// How many more ticks to try when the block entity is not there yet (0 = give up).
     retries: u8,
 }
@@ -681,6 +835,7 @@ fn queue_match(dimension: &str, pos: [i32; 3], matched: ShellMatch) {
         pos,
         formed: matched.formed,
         missing: matched.missing,
+        hatches: matched.hatches,
         retries: PENDING_RETRIES,
     });
 }
@@ -705,6 +860,178 @@ fn take_matches(dimension: &str) -> Vec<PendingMatch> {
     mine
 }
 
+/// The controllers whose shell matched, so `level_tick_post` pumps their
+/// hatches every tick: a block-entity tick has no level, so the transfer cannot
+/// live there. A controller that stops matching, or whose block entity is gone,
+/// leaves the list on the next tick.
+static FORMED_OVENS: Mutex<Vec<(String, [i32; 3])>> = Mutex::new(Vec::new());
+
+fn ovens() -> MutexGuard<'static, Vec<(String, [i32; 3])>> {
+    FORMED_OVENS
+        .lock()
+        .expect("the formed-oven list's lock is not poisoned")
+}
+
+/// Records whether the controller at `pos` matches, keeping the list bounded by
+/// the number of controllers that are actually formed.
+fn set_formed(dimension: &str, pos: [i32; 3], formed: bool) {
+    let mut list = ovens();
+    list.retain(|(at, p)| !(at == dimension && *p == pos));
+    if formed {
+        list.push((dimension.to_owned(), pos));
+    }
+}
+
+/// The formed controllers of one level.
+fn formed_in(dimension: &str) -> Vec<[i32; 3]> {
+    ovens()
+        .iter()
+        .filter(|(at, _)| at == dimension)
+        .map(|(_, pos)| *pos)
+        .collect()
+}
+
+/// The `hatchKinds` array a controller saves: one code per hatchable shell
+/// position, in [`hatch_members`] order, `-1` for a position holding no hatch.
+fn hatch_codes(hatches: &[([i32; 3], HatchKind)]) -> Vec<i32> {
+    hatch_members()
+        .map(|member| {
+            hatches
+                .iter()
+                .find(|(offset, _)| *offset == member.offset)
+                .map(|(_, kind)| kind.code())
+                .unwrap_or(-1)
+        })
+        .collect()
+}
+
+/// The saved hatch layout, `None` for a position holding no hatch (or a fluid
+/// hatch: the pump moves items only).
+fn be_hatch_kinds(nbt: &Compound) -> Vec<Option<HatchKind>> {
+    let count = hatch_members().count();
+    match nbt.get(&"hatchKinds".into()) {
+        Some(Tag::IntArray(values)) => (0..count)
+            .map(|index| values.get(index).copied().and_then(HatchKind::from_code))
+            .collect(),
+        _ => vec![None; count],
+    }
+}
+
+/// Pumps the formed controller's item hatches once, answering whether the
+/// controller's block entity is still there.
+fn pump_hatches(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) -> bool {
+    let Some(controller) = host.block_entity(level, pos) else {
+        return false;
+    };
+    let kinds = {
+        let base: &dyn Host = &*host;
+        controller
+            .data(base)
+            .map(|nbt| be_hatch_kinds(&nbt))
+            .unwrap_or_default()
+    };
+    if kinds.iter().all(Option::is_none) {
+        return true;
+    }
+    let offsets: Vec<[i32; 3]> = hatch_members().map(|member| member.offset).collect();
+    let seal = host.transaction_open();
+    {
+        let transaction = seal.transaction();
+        for (index, kind) in kinds.iter().enumerate() {
+            let Some(kind @ (HatchKind::ItemInput | HatchKind::ItemOutput)) = *kind else {
+                continue;
+            };
+            let Some(offset) = offsets.get(index) else {
+                continue;
+            };
+            let hatch_pos = [pos[0] + offset[0], pos[1] + offset[1], pos[2] + offset[2]];
+            let Some(hatch) = host.block_entity(level, hatch_pos) else {
+                continue;
+            };
+            pump_item(host, transaction, controller, hatch, kind);
+        }
+    }
+    host.transaction_close(&seal, true);
+    true
+}
+
+/// Moves one stack between one item hatch and the controller's internal slots:
+/// a whole stack into an empty slot, the free room into a stack of the same
+/// item (`merge_count`), nothing into another item.
+fn pump_item(
+    host: &mut dyn ServerHost,
+    transaction: &Transaction,
+    controller: BlockEntityRef,
+    hatch: BlockEntityRef,
+    kind: HatchKind,
+) {
+    // An input hatch feeds the controller's input slot; an output hatch drains
+    // the controller's output slot. Both are one slot on the hatch's side.
+    let (from, from_slot, to, to_slot) = match kind {
+        HatchKind::ItemInput => (hatch, 0, controller, COKE_INPUT_SLOT),
+        HatchKind::ItemOutput => (controller, COKE_OUTPUT_SLOT, hatch, 0),
+        _ => return,
+    };
+    // Plan under a shared borrow; the writes need the host mutably.
+    struct Move {
+        from: BlockEntityRef,
+        from_slot: u32,
+        to: BlockEntityRef,
+        to_slot: u32,
+        entry: ItemKey,
+        held: u32,
+        source_left: u32,
+        moved: u32,
+    }
+    let plan = {
+        let base: &dyn Host = &*host;
+        let Some(source) = from.item_slot(base, from_slot).ok().flatten() else {
+            return;
+        };
+        let entry = source.item();
+        let count = source.count();
+        let target = to.item_slot(base, to_slot).ok().flatten();
+        let held = target.as_ref().map(|stack| stack.count()).unwrap_or(0);
+        // `merge_count` takes ids; the keys are what the stacks are built from.
+        let source_id = entry.id(base);
+        let target_id = target
+            .as_ref()
+            .map(|stack| stack.item().id(base))
+            .unwrap_or_default();
+        let stack_size = base.max_stack_size(entry).unwrap_or(STACK_SIZE);
+        let moved = merge_count(
+            (&source_id, count),
+            target.as_ref().map(|_| (target_id.as_str(), held)),
+            stack_size,
+        );
+        if moved == 0 {
+            return;
+        }
+        Move {
+            from,
+            from_slot,
+            to,
+            to_slot,
+            entry,
+            held,
+            source_left: count - moved,
+            moved,
+        }
+    };
+    let source_after = (plan.source_left > 0)
+        .then(|| ItemStack::new(plan.entry, plan.source_left))
+        .flatten();
+    let target_after = ItemStack::new(plan.entry, plan.held + plan.moved);
+    let _ = plan
+        .from
+        .set_item_slot(host, transaction, plan.from_slot, source_after);
+    let _ = plan
+        .to
+        .set_item_slot(host, transaction, plan.to_slot, target_after);
+    let _ = plan.from.set_changed(host);
+    let _ = plan.to.set_changed(host);
+}
+
 /// The block id at `pos` in a read-only level (the `block_changed` view).
 fn level_block(level: &dyn LevelHost, pos: [i32; 3]) -> Option<&str> {
     level.state_block(level.block_state(pos)?)
@@ -716,8 +1043,22 @@ struct LevelShell<'a> {
 }
 
 impl Shell for LevelShell<'_> {
-    fn block_at(&self, pos: [i32; 3]) -> Option<&str> {
-        level_block(self.level, pos)
+    fn block_at(&self, pos: [i32; 3]) -> Option<String> {
+        level_block(self.level, pos).map(str::to_owned)
+    }
+}
+
+/// The same view over a `LevelRef`, for the commands (which hold a `Host` and a
+/// dimension rather than a [`LevelHost`]).
+struct RefShell<'a> {
+    host: &'a dyn Host,
+    level: LevelRef,
+}
+
+impl Shell for RefShell<'_> {
+    fn block_at(&self, pos: [i32; 3]) -> Option<String> {
+        let state = self.level.block_state(self.host, pos)?;
+        self.host.block_state_string(state)
     }
 }
 
@@ -791,6 +1132,65 @@ fn oven_id(host: &dyn Host, entity: BlockEntityRef) -> Option<String> {
     is_coke_oven(&id).then_some(id)
 }
 
+/// `/modern_industrialization recipes`: the coke oven's recipe kind, as another
+/// mod reads it. `Host::recipes_of_type` is the call the add-on makes; printing
+/// the ids and the files' JSON is the proof that the kind and its data are in
+/// force in this world.
+fn list_recipes(host: &mut dyn ServerHost) {
+    let recipes = host.recipes_of_type(COKE_RECIPE_KIND);
+    say(
+        host,
+        format!("{COKE_RECIPE_KIND}: {} recipes", recipes.len()),
+    );
+    for recipe in recipes.iter() {
+        let json = recipe.json.to_string();
+        say(host, format!("{} [{}] {json}", recipe.id, recipe.kind));
+    }
+}
+
+/// `/modern_industrialization shape <pos>`: the matcher's 3×3×4 harness check.
+/// The add-on `industrialization_overdrive` owns the pyrolyse oven's controller
+/// and declares that shell in its own code; this command matches the same
+/// template in the world so the parent's matcher, its per-position
+/// `HatchFlags`, and its hatch kinds are proven at 3×3×4 before that slice.
+fn match_shape(host: &mut dyn ServerHost, command: &CommandInvocation) {
+    let Some(pos) = block_pos(command, "pos") else {
+        say(host, "Usage: /modern_industrialization shape <x> <y> <z>");
+        return;
+    };
+    let Some(dimension) = command.dimension.id(host) else {
+        say(host, "No level for that position.");
+        return;
+    };
+    let Some(level) = host.level(&dimension) else {
+        say(host, "No level for that position.");
+        return;
+    };
+    let members = pyrolyse_shape_fixture();
+    let matched = match_shell(
+        &RefShell {
+            host: &*host,
+            level,
+        },
+        pos,
+        &members,
+    );
+    let now = level.game_time(&*host).unwrap_or(0);
+    let formed = if matched.formed { "true" } else { "false" };
+    say(
+        host,
+        format!(
+            "pyrolyse shape at {},{},{}: formed {formed}, missing {}, hatches {} ({} members), t={now}",
+            pos[0],
+            pos[1],
+            pos[2],
+            matched.missing,
+            matched.hatches.len(),
+            members.len(),
+        ),
+    );
+}
+
 /// `/modern_industrialization info <pos>`: what the machine holds, its run, its overclock, and
 /// for a multiblock its shell.
 fn report(host: &mut dyn ServerHost, command: &CommandInvocation) {
@@ -835,8 +1235,9 @@ fn report(host: &mut dyn ServerHost, command: &CommandInvocation) {
             let eu = status.energy / FE_PER_EU;
             let fe_per_tick = status.recipe_max_eu * i64::from(FE_PER_EU);
             let formed = if status.formed { "true" } else { "false" };
+            let hatches = be_hatch_kinds(&nbt).iter().flatten().count();
             format!(
-                "{id} at {},{},{}: {}/{} FE ({} EU), progress {}/1000, {fe_per_tick} FE/t, formed {formed}, missing {}, active {active}, t={now}",
+                "{id} at {},{},{}: {}/{} FE ({} EU), progress {}/1000, {fe_per_tick} FE/t, formed {formed}, missing {}, hatches {hatches}, active {active}, t={now}",
                 pos[0],
                 pos[1],
                 pos[2],

@@ -12,11 +12,14 @@ port is a clean-room Rust rewrite. What was read and the numbers extracted:
 **LOCAL-ONLY** until the maintainer approves publishing (ARCHITECTURE.md §8). MIT
 is licence rank 0 (permissive); the approval is still required.
 
-Status: **slice 1 implemented and verified in-game** — one block,
-`modern_industrialization:electric_macerator`: a 32,000 FE buffer, one item
-input, four item outputs, and `CrafterComponent`'s recipe tick with the LV
-tier's overclock, over 33 of the jar's own macerator recipes. Everything else in
-the mod (the other 23 machine families, the multiblocks, the generators, the
+Status: **slices 1–3 implemented and verified in-game** — the electric macerator
+(a 32,000 FE buffer, one input, four outputs, the LV overclock, 33 jar recipes),
+the coke oven (a 3×3×3 brick shell with `formed`/`missing`, the jar's two coke
+recipes) and, at slice 3, the four bronze hatches (item and fluid, in and out) a
+shell position may hold, the controller's item pump through them, the
+`bronze_plated_bricks`/coil companions and the coke oven's mod-readable recipe
+kind. Everything else in the mod (the other 23 machine families, the blast
+furnace and the rest of the multiblocks, the energy hatches, the generators, the
 pipes, the 290-odd material recipes) is a planned gap (below).
 
 > **Format (2026-11-18):** the port is now **one flat SDK `.hmod`** (mod API `0.2`, pin
@@ -535,6 +538,208 @@ re-forms it and the same run finishes for the recipe's total, 8,000 FE left of 2
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
 
+## Slice 3 — the hatches, the multiblock companions and the recipe kind (2026-11-21)
+
+**Pin** `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins
+`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`. Package version **0.2.2**.
+
+**The gap it closes.** `notes.md` 6a ("the hatches: a block per hatch type that a shell position
+may hold, its own one-slot container/tank, and the controller aggregating them"), plus the two
+parent-surface rows `industrialization_overdrive`'s own `tools/parent_surface.py` names as blocking
+after the shape: `bronze_plated_bricks` (its pyrolyse oven's shell and casing) and
+`cupronickel_coil`/`kanthal_coil` (its `pyrolyse_oven_tier` data map), and "a mod-registered
+*machine* recipe kind" / `MachineRecipeType` (its pyrolyse oven proxies the parent's coke recipes).
+Class `content`, tier `deep`; shape `machines`, as `horizon/docs/modpacks.md` asks of a multiblock's
+inventory and its shell.
+
+### The numbers, read from tag 2.5.12
+
+| Where | What it says |
+|---|---|
+| `MultiblockMachines.cokeOven` | `cokeOvenHatches = new HatchFlags.Builder().with(ITEM_INPUT).with(ITEM_OUTPUT).with(FLUID_INPUT).with(FLUID_OUTPUT).build()` on both end layers (`add3by3Levels(-1, 1, bricks, cokeOvenHatches)`) |
+| `ShapeTemplate.hatchFlags` | a `Map<BlockPos, HatchFlags>`: the middle ring keeps `HatchFlags.NO_HATCH`, so a hatch there cannot form the oven |
+| `MultiblockHatches.registerItemHatches("Bronze", "bronze", …, 1, 1, …)` | `bronze_item_input_hatch` / `bronze_item_output_hatch`, **one** item slot each |
+| `MultiblockHatches.registerFluidHatches("Bronze", "bronze", …, 4)` | `bronze_fluid_input_hatch` / `bronze_fluid_output_hatch`, **4,000 mB** each (four buckets) |
+| `HatchType`/`HatchTypes` | the `HatchType` values `item_input`, `item_output`, `fluid_input`, `fluid_output`, plus the energy/nuclear/large-tank kinds this slice does not port |
+| `MultiblockHatches` energy hatches | `lv_energy_input_hatch` etc. are a **different, tiered** family; the add-on's fifth hatch kind is one of them, a later slice |
+| `HatchBlockEntity`/`ItemHatch`/`FluidHatch` | `appendItemInputs`/`appendItemOutputs`/`appendFluidInputs`/`appendFluidOutputs` put the hatch's own storage into the multiblock's aggregated inventory |
+| `MIParts.COIL` (`asColumnBlock`) and `MACHINE_CASING_SPECIAL` | the coils are column blocks, destroy time 5.0; `bronze_plated_bricks` is a casing block, the same |
+
+### What was built
+
+| piece | where |
+|---|---|
+| `HatchKind` (4 kinds), `HatchKind::from_block`/`code`/`from_code`, `is_hatch` | `src/runtime.rs` |
+| `ShellMember.hatches: &'static [HatchKind]` — upstream's `HatchFlags` per position — and `ShellMember::brick`/`hatchable` | `src/runtime.rs` |
+| `match_shell(shell, origin, members)`: a member holds its block **or** an allowed hatch, and the match records each hatch's `HatchKind` (the per-position `Option<HatchKind>`) | `src/runtime.rs` |
+| `pyrolyse_shape_fixture`: the add-on's 3×3×4 shell (17 bronze-plated bricks, 16 coil positions, two roof corners hatchable), a matcher fixture only | `src/runtime.rs` |
+| `merge_count`: the pump's pure arithmetic (whole stack into empty, free room into same item, nothing into another item) | `src/runtime.rs` |
+| `COKE_RECIPE_KIND` + `COKE_RECIPE_FILES` (`include_str!` of the shipped data) | `src/runtime.rs` |
+| four hatch block entity types, one-slot/tank declarations, `HatchPart` (materialises storage once) | `src/lib.rs` |
+| the shell match saves `hatchKinds` (IntArray, `-1` = no hatch) beside `formed`/`shellMissing` | `src/lib.rs` |
+| `pump_hatches`/`pump_item`: every formed controller's item input/output hatches move one stack a tick, in a `transaction`; a loaded controller rejoins the list through `block_entity_on_load` | `src/lib.rs` |
+| `register_recipe_type("modern_industrialization:coke_oven")` + `register_raw_recipe_serializer(…)`, the two recipe files under `data/…/recipe/coke_oven/` | `src/lib.rs`, `data/` |
+| `/modern_industrialization recipes` (reads `Host::recipes_of_type`) and `shape <pos>` (matches the 3×3×4 fixture), both read-only harness additions | `src/lib.rs` |
+| the 7 blocks, their blockstates/models/items/textures/loot/lang/tags/creative tab | `assets/`, `data/` |
+
+**Hooks:** the slice adds **11 API items** (352 vs 342 at `check`): `block_entity_on_load` (v1) joined
+the ten already used. The rest is data/declarations, not new hooks.
+
+### The red proof (verbatim)
+
+`sdk-test-prelog.log` — the 9 new runtime tests existed and nothing implemented the new shell API;
+the crate did not compile, which is the TDD red for the family:
+
+```
+error[E0053]: method `block_at` has an incompatible type for trait
+    --> src/lib.rs:719:42
+error[E0061]: this function takes 3 arguments but 2 arguments were supplied
+    --> src/lib.rs:227:27
+error: could not compile `modern_industrialization` (lib) due to 2 previous errors
+```
+
+The first run of the new tests then failed on `the_three_by_three_by_four_add_on_shell_matches`
+(`assertion failed: !matched.formed` at an offset the fixture made a brick, not a coil); choosing the
+actual first coil offset fixed the test, and the test now pins the add-on's 17+16 counts.
+
+### Green
+
+| step | evidence | result |
+|---|---|---|
+| tests | `sdk-test.log` | **50 passed**, 0 failed (41 + 9 new) |
+| lints | `sdk-clippy-slice3.log` | exit 0, **0 warnings** |
+| format | `cargo fmt --check` | clean |
+| build 1 + 2 | `sdk-build.log`, `sdk-build-2.log` | **byte-identical**, `d2d388ce…` |
+| package | — | **103,597 B**, SHA-256 `d2d388ce1932fbd94afeb75c2d804951692f992d0786c0596e41fddf22276ae7`, **129 entries**, no packed `Cargo.lock` |
+| check | `sdk-check.log` | exit 0, `modern_industrialization 0.2.2 (native-mod, format native-1/0a875da…/e59da909…, for 26.3)` |
+| fits (the pin) | `sdk-fits.log` | `0a875da  made for`, exit 0 |
+| fits (another build) | `sdk-fits-next.log` | `0b14f8a  fits`, exit 0 |
+| gate | `verify-sdk-package.py` | **1/1** |
+| in game | `evidence/modern_industrialization-e2e/e2e-launcher.log` | **PASS** + `EXIT:0` |
+| control | `e2e-launcher-control.log` | **FAIL** + `EXIT:1` (`expected …electric_macerator at 0,100,0, got 'minecraft:air'`) |
+| fail-capability | `e2e-launcher-selftest.log` | **FAIL** + `EXIT:1` (`SELFTEST flipped: the unformed oven ran nothing and burned nothing, as it should`) |
+| log gate | `check-e2e-logs.py modern_industrialization-e2e --strict` | logs=5 ok=5 |
+
+The launcher rebuilt the game for this version (`native-0a875da-7f4050165798`); all three legs ran
+against that export.
+
+### The in-game leg (quoted from `e2e-launcher.log`)
+
+Controller at `8,101,0`; item input hatch at `7,100,0`, item output hatch at `9,102,2`, fluid input
+hatch at `8,100,0`; the matcher's 3×3×4 fixture at `20,101,0`.
+
+```
+== C: a 3x3x3 shell of 22 bricks and three bronze hatches forms it ==
+  shell(8,101,0) = 22 bricks + 3 hatches
+  oven(8,101,0): modern_industrialization:coke_oven at 8,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3, active none, t=2272
+  hatch slots(7,100,0) = 1
+  hatch slots(9,102,2) = 1
+  hatch slots(8,100,0) = 0
+== D: one coal in the ITEM INPUT HATCH becomes one coke in the ITEM OUTPUT HATCH ==
+  running: modern_industrialization:coke_oven at 8,101,0: 19320/32000 FE (1932 EU), progress 56/1000, 20 FE/t, formed true, missing 0, hatches 3, active modern_industrialization:coke_oven_coal_to_coke, t=2326
+  has(7,100,0) minecraft:coal x0: ok
+  modern_industrialization:coke_oven at 8,101,0: 8000/32000 FE (800 EU), progress 0/1000, 0 FE/t, formed true, missing 0, hatches 3, active none, t=2962
+  has(9,102,2) modern_industrialization:coke x1: ok
+  has(8,101,0) modern_industrialization:coke x0: ok
+== D2: the jar's second coke oven recipe (coal dust), through the hatch ==
+  has(9,102,2) modern_industrialization:coke_dust x1: ok
+== E: breaking one brick unforms the oven and freezes the run ==
+  oven(8,101,0): … formed false, missing 1, hatches 3, active modern_industrialization:coke_oven_coal_to_coke, t=3796
+  after 120 unformed ticks: … 18280/32000 FE, progress 143/1000, formed false, missing 1, hatches 3 …
+  a coil in the gap does not re-form it (the shell is block-specific)
+  a brick put back re-forms it and the paused run finishes
+  resumed: … 8000/32000 FE (800 EU), progress 0/1000, formed true, missing 0, hatches 3 …
+  has(9,102,2) modern_industrialization:coke x1: ok
+== F: a hatch in a middle-ring position (HatchFlags.NO_HATCH) does not form it ==
+  oven(8,101,0): … formed false, missing 1 …
+== G: /modern_industrialization recipes reads the coke oven kind back ==
+  modern_industrialization:coke_oven/coke [modern_industrialization:coke_oven] {"duration":600,"eu":2,…,"item_inputs":{"amount":1,"item":"minecraft:coal"},"item_outputs":{"amount":1,"item":"modern_industrialization:coke"},"type":"modern_industrialization:coke_oven"}
+== H: the add-on companions and the 3x3x4 matcher check ==
+  block(20,100,6) = modern_industrialization:bronze_plated_bricks
+  block(20,100,7) = modern_industrialization:cupronickel_coil
+  block(20,100,8) = modern_industrialization:kanthal_coil
+  shape fixture(20,101,0) = 33 members
+  shape(20,101,0): pyrolyse shape at 20,101,0: formed true, missing 0, hatches 2 (33 members), t=4747
+  shape(20,101,0): pyrolyse shape at 20,101,0: formed false, missing 1, hatches 2 (33 members), t=4763
+  shape(20,101,0): pyrolyse shape at 20,101,0: formed false, missing 1, hatches 2 (33 members), t=4779
+  shape(20,101,0): pyrolyse shape at 20,101,0: formed true, missing 0, hatches 2 (33 members), t=4795
+PASS: …
+EXIT:0
+```
+
+What the numbers prove: the shell accepts a hatch exactly where the jar's `HatchFlags` do (22 bricks +
+3 hatches forms; the same hatch in the middle ring is `missing 1`); an item hatch exposes one slot
+and a fluid hatch none; **the controller's run is fed through the input hatch and its product leaves
+by the output hatch** (the coal is gone from the hatch and the controller's own output is empty when
+the coke sits in the output hatch — a missing pump cannot produce that); both jar recipes cost exactly
+12,000 FE through hatches; a player break still freezes the run at 143‰ for 120 ticks; the 3×3×4
+fixture matches with 17 bronze bricks and 16 coil positions and two hatches, and unforms on one broken
+coil or a brick where a coil belongs; `/modern_industrialization recipes` shows the 2 recipes the
+add-on reads by type, with `duration: 600` and the item ids in the files.
+
+### Coverage (every family this slice ships)
+
+| family | state |
+|---|---|
+| the four bronze hatches as shell members | **tested** — C (22 bricks + 3 hatches: `formed true, missing 0, hatches 3`), F (a hatch in the middle ring: `formed false, missing 1`), the unit tests for the allowed kinds and the brick-only ring |
+| hatch storage | **tested** — C: item hatches expose 1 slot, the fluid hatch 0 (`ctl container`), the controller keeps its 2 internal slots |
+| the controller ↔ item hatch pump (in and out) | **tested** — D/D2: the coal/coal dust enters through the input hatch (`has … x0` after the pump), the coke/coke dust leaves into the output hatch while the controller's own output is empty |
+| the fluid hatch's 4,000 mB tank | **not ported (contents)** — the block forms the shell and is read back, but the harness has no fluid command and a mod fluid cannot live in a BE tank via `fluid_insert` (`enderstorage`'s measured gap); the tank is declared, the coke recipes take no fluid input, and the creosote output stays dropped (`notes.md` 6c) |
+| the energy hatch family | **not ported** — a different, tiered family (`lv/mv/hv/ev/superconductor`); the add-on's fifth hatch kind; a later slice |
+| the multiblock companions `bronze_plated_bricks`, `cupronickel_coil`, `kanthal_coil` | **tested** — H: placed and read back; the coils are also the 16-member half of the 3×3×4 fixture; all self-drop and are in the tags/creative tab |
+| the coke oven recipe kind another mod reads | **tested** — G: `recipes_of_type("modern_industrialization:coke_oven")` answers 2 recipes with their ids and file JSON; the unit test pins the shipped files to `COKE_RECIPES` |
+| the 3×3×4 shell matcher (the add-on's shape) | **tested** — H: formed true/missing 0/hatches 2, one coil broken missing 1, a brick where a coil belongs still missing 1; the unit test also pins 17 bricks + 16 coil positions |
+| the coke oven itself and the macerator (regression) | **tested** — C–F and the unchanged macerator legs |
+
+### Deviations this slice introduces
+
+1. **The controller keeps its two item slots** as the run buffer, and the pump feeds/drains them. Upstream's
+   controller has no inventory: the hatches are the inventory. Keeping the slots means a player or a
+   hopper can still feed the controller directly (the slice-2 deviation); the hatch path is the one the
+   e2e proves, and `notes.md` records the extra route.
+2. **Steam is still modelled as FE**, as slice 2; the fluid hatches hold a declared tank but the machine
+   takes no fluid, because neither jar recipe has a fluid input.
+3. **The creosote fluid output is still dropped** (500 mB at 50%) — the fluid-tank gap (6c), not a choice.
+4. **The hatches do not auto-insert/auto-extract** (`tickTransfer`): a hopper or pipe uses the container
+   capability, which is the visible behaviour; the GUI's auto-extract toggle is part of the unported GUI.
+5. **The hatches' models** are port-authored plain models (bronze casing + the jar's side/output
+   overlays) because the jar's `modern_industrialization:machine` model loader is a client mod feature;
+   the textures are the jar's.
+6. **`shape` is a harness command**, not a game object: it matches the add-on's 3×3×4 template without a
+   pyrolyse-oven controller (which the add-on owns and this port must not build). It is the parent's
+   matcher proof at 3×3×4, and it is recorded as an addition like `energy`/`efficiency`.
+7. **The machine's table is still `COKE_RECIPES`** (a constant): the *kind* is data and another mod reads
+   it, but the oven itself does not re-read the files at runtime. The unit test
+   `the_shipped_coke_recipe_data_is_the_kind_another_mod_reads` pins the two together, so they cannot
+   drift; a future slice can make the tick read the data through the same `recipes_of_type` call.
+8. **An oven saved by 0.2.1 has no `hatchKinds`**, so its hatches start pumping on the first shell
+   change (or after re-placing the controller), not immediately on load. Nothing is lost: the saved
+   run, buffer and `formed` are read as before; only the new layout is missing until a rematch.
+
+### Pin findings for the next slice
+
+- **Another mod can read a machine recipe kind at this pin.** `Registrar::register_recipe_type(id)` +
+  `register_raw_recipe_serializer(serializer, id)` (or `register_read_only_recipe_serializer` for an
+  independently declared type), then `Host::recipes_of_type(id) -> Arc<[Recipe]>` gives each recipe's
+  `id`, `kind` and the file's `serde_json::Value` (its `Display` is compact JSON). The recipe files
+  load from the package's own `data/<ns>/recipe/` even though the package is native. This closes the
+  "no mod-readable machine recipe kind" half of slice 1's gap 3; the machine-side table is still code.
+- **`item_slot` / `set_item_slot` work across block entities** inside
+  `ServerHost::transaction_open()` … `transaction_close(&seal, true)`: a controller can read and write a
+  hatch's slot in the same tick. `set_item_slot` is silent, so `set_changed` is what dirties the chunk;
+  `item_slot` returns `Ok(None)` for an empty slot and `Err(Stale)` for a removed/reloaded entity.
+- **`block_entity_on_load` (v1)** gives `HostSide` + `BlockEntityOnLoadEvent { id, entity }`, so a
+  controller can rejoin a session list after a world reload; without it the pump would only start on
+  the next shell change. `entity.level(host)` + `level.dimension().id(host)` give the key.
+- **A length-less `level_tick_post` stays the right place for per-tick world work**: the block-entity
+  tick still has no level (slice 1's gap 2), so the pump and the shape write both live in
+  `level_tick_post`; the Part's tick only reads the saved layout.
+- **The harness cannot fill a fluid tank** (`ctl` has no fluid command), and `enderstorage`'s gap stands:
+  a mod fluid's amount in a BE tank is not written by `fluid_insert`. The fluid hatch's contents are
+  therefore unasserted, and the creosote output waits for the tank slice.
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
 ## Next slices (in dependency order)
 
 1. **The steam pair** (`bronze_macerator`, `bronze_furnace`) on the same tick: a
@@ -543,8 +748,9 @@ Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-de
 2. **The material recipes**: register the dust→ingot and ore→crushed chains
    (`c:ores/*`, `c:dusts/*`) with the MI items they need, which grows the
    macerator's table back toward the jar's 324 and makes the dusts useful.
-3. **A data-driven recipe type** (an issue-shaped gap): a mod-registered machine
-   recipe read from the content's `data/`, so recipes stop being code.
+3. **A data-driven recipe type** — **half done (slice 3):** the coke oven's kind is registered, shipped
+   as data and readable by another mod (`Host::recipes_of_type`); the oven's own table is still a
+   constant. What is left: make the tick read the data (then both jar recipes stop being code).
 4. **The item/fluid pipes and the LV cable**: MI energy is its own cable tier;
    with API 142's move helper a cable slice can wire machines together.
 5. **The electric machines that are the same shape** (furnace, compressor,
@@ -553,17 +759,20 @@ Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-de
 6. ~~**The multiblocks** (coke oven, blast furnace, distillation tower): controllers,
    hatches and shape matching, a slice of their own.~~ **Partly done (slice 2):** the shell
    template, the controller, `formed` and the coke oven. What is left, in order:
-   6a. **The hatches** (`bronze_item_input_hatch`, `bronze_item_output_hatch`,
-       `bronze_fluid_input_hatch`, `bronze_fluid_output_hatch`): a block per hatch type that a
-       shell position may hold, its own one-slot container/tank, and the controller aggregating
-       them, so a multiblock takes its input and gives its output through the shell instead of
-       through the controller. This is also what `industrialization_overdrive` needs next after
-       the shape (`HatchTypes`/`HatchBlockEntity` in its parent-surface list).
+   6a. ~~**The hatches** (`bronze_item_input_hatch`, `bronze_item_output_hatch`,
+       `bronze_fluid_input_hatch`, `bronze_fluid_output_hatch`): a block per hatch type, its own
+       one-slot container/tank, the controller aggregating them.~~ **Done (slice 3):** the four
+       bronze hatches, the per-position `HatchFlags`, the item pump through the shell, the
+       `bronze_plated_bricks`/coil companions and the readable coke recipe kind are in. What is
+       left for `industrialization_overdrive`: the **energy hatch family**
+       (`lv_energy_input_hatch` etc.) — its fifth hatch kind — and its own controller, which is the
+       add-on's slice.
    6b. **The steam blast furnace** (`steam_blast_furnace`, the mod's own `fire_clay_bricks`
        over 3×3×4) on the same machinery, plus `fire_clay_bricks` and its recipe.
    6c. **A fluid tank for a mod's own fluid** (`modern_industrialization:steam`, `creosote`) —
-       the recorded gap (`Registrar::block_fluids` exists; the harness cannot fill it, and the
-       coke oven's creosote output is the first thing it would carry).
+       the recorded gap (`Registrar::block_fluids` exists; the harness cannot fill it, a mod fluid's
+       `fluid_insert` does not land in a BE tank, and the coke oven's creosote output is the first
+       thing it would carry).
    6d. **The distillation tower, heat exchanger, vacuum freezer, implosion compressor, fusion
        reactor** — each a `ShapeTemplate` with pipes and tier data maps (data maps are the tier
        surface the ledger notes as not yet used by any port).

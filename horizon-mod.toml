@@ -1,6 +1,6 @@
 id = "modern_industrialization"
 name = "Modern Industrialization"
-version = "0.2.1"
+version = "0.2.2"
 description = """A port of Modern Industrialization for Horizon: the electric macerator and the coke oven,
 the first machine and the first multiblock of the mod's steam and electric ages. The macerator carries
 a 32,000 FE buffer, one item input slot and four item output slots, and runs upstream's
@@ -9,9 +9,13 @@ speeds it up without making it cheaper. The coke oven is a 3x3x3 shell of bricks
 controller: the controller matches the shell as upstream's ShapeTemplate declares it, reports
 `formed` and how many blocks are missing, and runs the jar's coke recipe (1 coal to 1 coke at 2 EU/t
 for 600 ticks) only while the shell is whole, pausing the run when a brick is broken and resuming it
-when the shell is rebuilt. Thirty-five of the jar's own recipes are carried, the blocks and items load
-from this package's own content, and /modern_industrialization reports a machine's buffer, progress,
-efficiency and shell. The other machine families, the hatches, the generators and the pipes are not
+when the shell is rebuilt. The four bronze hatches (item and fluid, input and output) may take any
+shell position the jar's HatchFlags allows, the controller takes its input from the input hatch and
+puts its output into the output hatch, and the bronze-plated bricks and the cupronickel and kanthal
+coils the add-on multiblocks build with are registered. The coke oven's recipe kind is also a data
+recipe kind another mod can read. Thirty-five of the jar's own recipes are carried, the blocks and
+items load from this package's own content, and /modern_industrialization reports a machine's buffer,
+progress, efficiency and shell. The other machine families, the generators and the pipes are not
 ported yet."""
 authors = ["Azercoco", "Technici4n", "AdLf0208"]
 # A native mod: Rust in src/, compiled by the launcher against the game build [native] pins, beside

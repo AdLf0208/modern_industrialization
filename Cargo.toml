@@ -6,7 +6,7 @@
 #
 # Cargo's name and version are not the mod's identity: horizon-mod.toml is.
 name = "modern_industrialization"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license = "MIT"
 description = "Modern Industrialization for Horizon: the electric macerator and the coke oven"
