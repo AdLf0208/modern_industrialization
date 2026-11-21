@@ -86,7 +86,7 @@ pub struct Output {
 
 /// One macerator recipe, as the mod's datapack holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MaceratorRecipe {
+pub struct MachineRecipe {
     /// A stable id, saved in the block entity's compound.
     pub id: &'static str,
     /// EU a tick, before the tier's base rate and the overclock (`eu`).
@@ -99,7 +99,7 @@ pub struct MaceratorRecipe {
     pub outputs: &'static [Output],
 }
 
-impl MaceratorRecipe {
+impl MachineRecipe {
     /// The energy one run costs, `eu * duration`, overclock or not.
     pub fn total_eu(&self) -> i64 {
         i64::from(self.eu) * i64::from(self.duration)
@@ -193,7 +193,7 @@ pub struct Macerator {
 }
 
 /// The recipe with this id, if the table holds it.
-pub fn recipe(id: &str) -> Option<&'static MaceratorRecipe> {
+pub fn recipe(id: &str) -> Option<&'static MachineRecipe> {
     RECIPES.iter().find(|recipe| recipe.id == id)
 }
 
@@ -207,7 +207,7 @@ pub fn recipe_max_eu(recipe_eu: i32, total_eu: i64, efficiency: i32) -> i64 {
 
 /// `CrafterComponent.getRecipeMaxEfficiencyTicks`: the overclock ticks at which
 /// a recipe reaches `min(maxEu, totalEu)`.
-pub fn max_efficiency_ticks(recipe: &MaceratorRecipe) -> i32 {
+pub fn max_efficiency_ticks(recipe: &MachineRecipe) -> i32 {
     let total = recipe.total_eu();
     let target = total.min(i64::from(MAX_EU));
     if recipe_max_eu(recipe.eu, total, 0) >= target {
@@ -221,7 +221,7 @@ pub fn max_efficiency_ticks(recipe: &MaceratorRecipe) -> i32 {
 
 /// Whether a run can start now: every input is in the slot and every certain
 /// output has room (`CrafterComponent.canStartRecipe`, without the locks).
-pub fn can_start(recipe: &MaceratorRecipe, slots: &dyn Slots) -> bool {
+pub fn can_start(recipe: &MachineRecipe, slots: &dyn Slots) -> bool {
     let inputs = combined(recipe.inputs.iter().map(|input| (input.item, input.amount)));
     if inputs
         .iter()
@@ -255,7 +255,7 @@ fn combined<'a>(items: impl Iterator<Item = (&'a str, u32)>) -> Vec<(&'a str, u3
 }
 
 /// Takes the inputs of a run (`CrafterComponent.takeItemInputs`).
-fn take_inputs(recipe: &MaceratorRecipe, slots: &mut dyn Slots) {
+fn take_inputs(recipe: &MachineRecipe, slots: &mut dyn Slots) {
     for input in recipe.inputs {
         slots.take(input.item, input.amount);
     }
@@ -263,11 +263,7 @@ fn take_inputs(recipe: &MaceratorRecipe, slots: &mut dyn Slots) {
 
 /// Gives the outputs of a finished run, rolling each chance with `roll`
 /// (`CrafterComponent.putItemOutputs`). `roll` answers 0..[`PROBABILITY_SCALE`].
-pub fn apply_outputs(
-    recipe: &MaceratorRecipe,
-    slots: &mut dyn Slots,
-    roll: &mut dyn FnMut() -> u32,
-) {
+pub fn apply_outputs(recipe: &MachineRecipe, slots: &mut dyn Slots, roll: &mut dyn FnMut() -> u32) {
     for output in recipe.outputs {
         if output.permille < PROBABILITY_SCALE && roll() >= output.permille {
             continue;
@@ -437,8 +433,8 @@ impl Macerator {
 /// vanilla items. A `#c:` tag input became one row per item the tag holds in
 /// this pack. The mod's other 290-odd macerator recipes need its own ingots,
 /// plates, gears, rods and wires, which this slice does not register.
-pub const RECIPES: &[MaceratorRecipe] = &[
-    MaceratorRecipe {
+pub const RECIPES: &[MachineRecipe] = &[
+    MachineRecipe {
         // vanilla_recipes/macerator/stone_to_cobblestone.json
         id: "modern_industrialization:stone_to_cobblestone",
         inputs: &[Input {
@@ -453,7 +449,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/gravel.json
         id: "modern_industrialization:cobblestone_to_gravel",
         inputs: &[Input {
@@ -468,7 +464,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/sand.json
         id: "modern_industrialization:gravel_to_sand",
         inputs: &[Input {
@@ -483,7 +479,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/sandstone_to_sand.json
         id: "modern_industrialization:sandstone_to_sand",
         inputs: &[Input {
@@ -498,7 +494,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/red_sandstone_to_sand.json
         id: "modern_industrialization:red_sandstone_to_red_sand",
         inputs: &[Input {
@@ -513,7 +509,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/cobbled_deepslate.json
         id: "modern_industrialization:deepslate_to_cobbled_deepslate",
         inputs: &[Input {
@@ -528,7 +524,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/glowstone_dust.json
         id: "modern_industrialization:glowstone_to_glowstone_dust",
         inputs: &[Input {
@@ -543,7 +539,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/bone_meal_from_block.json
         id: "modern_industrialization:bone_block_to_bone_meal",
         inputs: &[Input {
@@ -558,7 +554,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/bone_meal_from_bone.json
         id: "modern_industrialization:bone_to_bone_meal",
         inputs: &[Input {
@@ -573,7 +569,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/blaze_dust.json
         id: "modern_industrialization:blaze_rod_to_blaze_powder",
         inputs: &[Input {
@@ -588,7 +584,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/clay_ball.json
         id: "modern_industrialization:clay_to_clay_ball",
         inputs: &[Input {
@@ -603,7 +599,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/sugar.json
         id: "modern_industrialization:sugar_cane_to_sugar",
         inputs: &[Input {
@@ -618,7 +614,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/gilded_blackstone.json
         id: "modern_industrialization:gilded_blackstone_to_gold_nugget",
         inputs: &[Input {
@@ -633,7 +629,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // vanilla_recipes/macerator/netherite_scrap.json
         id: "modern_industrialization:ancient_debris_to_netherite_scrap",
         inputs: &[Input {
@@ -648,7 +644,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 800,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/macerator/brick_dust_from_block.json
         id: "modern_industrialization:bricks_to_brick_dust",
         inputs: &[Input {
@@ -663,7 +659,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 200,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/macerator/copper_ore_to_raw.json (tag c:ores/copper)
         id: "modern_industrialization:copper_ore_to_raw_copper",
         inputs: &[Input {
@@ -678,7 +674,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/macerator/copper_ore_to_raw.json (tag c:ores/copper)
         id: "modern_industrialization:copper_ore_to_raw_copper_from_deepslate_copper_ore",
         inputs: &[Input {
@@ -693,7 +689,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/coal/macerator/gem.json
         id: "modern_industrialization:coal_to_coal_dust",
         inputs: &[Input {
@@ -708,7 +704,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/brick/macerator/ingot.json
         id: "modern_industrialization:brick_to_brick_dust",
         inputs: &[Input {
@@ -723,7 +719,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/diamond/macerator/gem.json
         id: "modern_industrialization:diamond_to_diamond_dust",
         inputs: &[Input {
@@ -738,7 +734,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 800,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/emerald/macerator/gem.json
         id: "modern_industrialization:emerald_to_emerald_dust",
         inputs: &[Input {
@@ -753,7 +749,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 800,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/lapis/macerator/gem.json
         id: "modern_industrialization:lapis_lazuli_to_lapis_dust",
         inputs: &[Input {
@@ -768,7 +764,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/quartz/macerator/gem.json
         id: "modern_industrialization:quartz_to_quartz_dust",
         inputs: &[Input {
@@ -783,7 +779,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/iron/macerator/ingot.json (tag c:ingots/iron)
         id: "modern_industrialization:iron_ingot_to_iron_dust",
         inputs: &[Input {
@@ -798,7 +794,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 200,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/copper/macerator/ingot.json (tag c:ingots/copper)
         id: "modern_industrialization:copper_ingot_to_copper_dust",
         inputs: &[Input {
@@ -813,7 +809,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/gold/macerator/ingot.json (tag c:ingots/gold)
         id: "modern_industrialization:gold_ingot_to_gold_dust",
         inputs: &[Input {
@@ -828,7 +824,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/iron/macerator/raw_metal.json (tag c:raw_materials/iron)
         id: "modern_industrialization:raw_iron_to_iron_dust",
         inputs: &[Input {
@@ -850,7 +846,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/copper/macerator/raw_metal.json (tag c:raw_materials/copper)
         id: "modern_industrialization:raw_copper_to_copper_dust",
         inputs: &[Input {
@@ -872,7 +868,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 50,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/gold/macerator/raw_metal.json (tag c:raw_materials/gold)
         id: "modern_industrialization:raw_gold_to_gold_dust",
         inputs: &[Input {
@@ -894,7 +890,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 50,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/iron/macerator/ore_to_raw.json (tag c:ores/iron)
         id: "modern_industrialization:iron_ore_to_raw_iron",
         inputs: &[Input {
@@ -909,7 +905,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 200,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/iron/macerator/ore_to_raw.json (tag c:ores/iron)
         id: "modern_industrialization:iron_ore_to_raw_iron_from_deepslate_iron_ore",
         inputs: &[Input {
@@ -924,7 +920,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 200,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/gold/macerator/ore_to_raw.json (tag c:ores/gold)
         id: "modern_industrialization:gold_ore_to_raw_gold",
         inputs: &[Input {
@@ -939,7 +935,7 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         eu: 2,
         duration: 100,
     },
-    MaceratorRecipe {
+    MachineRecipe {
         // materials/gold/macerator/ore_to_raw.json (tag c:ores/gold)
         id: "modern_industrialization:gold_ore_to_raw_gold_from_deepslate_gold_ore",
         inputs: &[Input {
@@ -953,6 +949,452 @@ pub const RECIPES: &[MaceratorRecipe] = &[
         }],
         eu: 2,
         duration: 100,
+    },
+];
+
+// ---------------------------------------------------------------------------
+// Slice 2: the coke oven multiblock
+// ---------------------------------------------------------------------------
+
+/// The controller's block id: upstream's `MultiblockMachines.cokeOven`.
+pub const COKE_OVEN_ID: &str = "modern_industrialization:coke_oven";
+
+/// The block the shell must be: upstream's `SimpleMember.forBlock(() -> Blocks.BRICKS)`.
+/// The coke oven is the one multiblock whose casing is vanilla's brick, which is
+/// why its shell is not one of the mod's own machine blocks.
+pub const COKE_OVEN_BRICK: &str = "minecraft:bricks";
+
+/// The hollow interior of the middle layer. Upstream's `add3by3(hollow = true)`
+/// skips `(0, 0, 1)` and `ShapeTemplate.build()` removes the controller's own
+/// `(0, 0, 0)`, so neither position is part of the shape and neither is checked:
+/// air, stone or a machine there is the player's business.
+pub const COKE_OVEN_INTERIOR: [i32; 3] = [0, 0, 1];
+
+/// The steam tier's EU a tick: `SteamCraftingMultiblockBlockEntity.getBaseRecipeEu`
+/// is `overclockComponent.getRecipeEu(steelHatches ? 4 : 2)` and `getMaxRecipeEu`
+/// returns the same, so a coke oven runs at exactly 2 EU/t (20 FE/t) with the
+/// bronze hatches the jar's shape allows, and the steel hatches' 4 EU/t are not
+/// ported. There is no overclock: the recipe always costs `eu * duration`.
+pub const COKE_EU: i32 = 2;
+
+/// The controller's buffer in FE. Upstream's steam machines store steam, not EU
+/// (`SteamHelper.consumeSteamEu`: 1 mB of steam is 1 EU); the pin cannot keep a
+/// mod's fluid in a block-entity tank, so this slice stores the same amount of
+/// energy as FE at the mod's own ratio — 3,200 EU = 32,000 FE, the LV tier's
+/// buffer, as slice 1's electric macerator does. `notes.md` records the deviation.
+pub const COKE_CAPACITY_FE: i32 = CAPACITY_FE;
+
+/// One position of a multiblock shape and the block that must be there
+/// (upstream's `ShapeTemplate.simpleMembers`: an offset from the controller and
+/// a `SimpleMember`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellMember {
+    /// The position relative to the controller's own block.
+    pub offset: [i32; 3],
+    /// The block id the position must hold.
+    pub block: &'static str,
+}
+
+/// The coke oven's shell, exactly as tag 2.5.12 builds it:
+///
+/// ```java
+/// ShapeTemplate cokeOvenShape = new ShapeTemplate.Builder(MachineCasings.BRICKS)
+///         .add3by3Levels(-1, 1, bricks, cokeOvenHatches).build();
+/// ```
+///
+/// `add3by3Levels(-1, 1, …)` writes the full 3×3 at y=-1, the 3×3 at y=0 with the
+/// interior `(0,0,1)` hollowed out, and the full 3×3 at y=1; `build()` then
+/// removes `(0,0,0)`, the controller's own position. That is 9 + 7 + 9 = 25
+/// members, all `minecraft:bricks`, in a 3×3×3 box whose front-centre of the
+/// middle layer is the controller and which extends two blocks to +z.
+pub const COKE_OVEN_SHELL: &[ShellMember] = &[
+    // y = -1: the full 3x3 floor (upstream: hatchable, `add3by3(-1, …, false, …)`).
+    ShellMember {
+        offset: [-1, -1, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [0, -1, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, -1, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [-1, -1, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [0, -1, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, -1, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [-1, -1, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [0, -1, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, -1, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    // y = 0: the ring around the hollow interior and the controller (7).
+    ShellMember {
+        offset: [-1, 0, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, 0, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [-1, 0, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, 0, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [-1, 0, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [0, 0, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, 0, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    // y = 1: the full 3x3 roof (upstream: hatchable).
+    ShellMember {
+        offset: [-1, 1, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [0, 1, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, 1, 0],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [-1, 1, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [0, 1, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, 1, 1],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [-1, 1, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [0, 1, 2],
+        block: COKE_OVEN_BRICK,
+    },
+    ShellMember {
+        offset: [1, 1, 2],
+        block: COKE_OVEN_BRICK,
+    },
+];
+
+/// Whether a block change can change a coke oven's match: only a shell member's
+/// block or the controller's own block can, so a world full of leaf decay and
+/// water flow does not make the glue read 25 blocks per change.
+#[must_use]
+pub fn shell_relevant(old: &str, new: &str) -> bool {
+    [old, new]
+        .iter()
+        .any(|id| *id == COKE_OVEN_BRICK || *id == COKE_OVEN_ID)
+}
+
+/// The world as a shape match sees it: the block id at an absolute position.
+pub trait Shell {
+    /// The block at `pos`, or `None` where the level has none.
+    fn block_at(&self, pos: [i32; 3]) -> Option<&str>;
+}
+
+/// What a shape match found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ShellMatch {
+    /// Whether every member holds its declared block.
+    pub formed: bool,
+    /// How many members are wrong or missing (upstream's "missing blocks").
+    pub missing: u8,
+}
+
+/// Matches [`COKE_OVEN_SHELL`] around the controller at `origin`.
+#[must_use]
+pub fn match_shell(shell: &dyn Shell, origin: [i32; 3]) -> ShellMatch {
+    let mut missing = 0;
+    for member in COKE_OVEN_SHELL {
+        let pos = [
+            origin[0] + member.offset[0],
+            origin[1] + member.offset[1],
+            origin[2] + member.offset[2],
+        ];
+        if shell.block_at(pos) != Some(member.block) {
+            missing += 1;
+        }
+    }
+    ShellMatch {
+        formed: missing == 0,
+        missing,
+    }
+}
+
+/// What a coke oven saves, so a reload resumes its run and its shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OvenSaved {
+    /// Stored FE (the block entity's saved `energy`).
+    pub energy: i32,
+    /// EU the active run has used.
+    pub used_eu: i64,
+    /// EU the active run costs in all.
+    pub recipe_energy: i64,
+    /// EU a tick the active run takes now.
+    pub recipe_max_eu: i64,
+    /// The active recipe's id.
+    pub active: Option<&'static str>,
+    /// Whether the shell matched at the last check.
+    pub formed: bool,
+    /// The members that were wrong or missing at the last check.
+    pub missing: u8,
+}
+
+/// What `/modern_industrialization info` prints for a coke oven.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OvenStatus {
+    /// Stored FE.
+    pub energy: i32,
+    /// EU a tick the active run takes now.
+    pub recipe_max_eu: i64,
+    /// The active recipe's id.
+    pub active: Option<&'static str>,
+    /// Whether the shell matched at the last check.
+    pub formed: bool,
+    /// The members that were wrong or missing at the last check.
+    pub missing: u8,
+    /// Progress through the active run, in thousandths.
+    pub progress_permille: u16,
+}
+
+/// The coke oven's state: its buffer, its run, and whether its shell matches.
+///
+/// Upstream's `AbstractCraftingMultiblockBlockEntity` ticks its `CrafterComponent`
+/// only while the shape matches (`OperatingState.NORMAL_OPERATION`); while it does
+/// not (`NOT_MATCHED`) the crafter is not ticked at all, so a run is paused and
+/// resumes (`TRYING_TO_RESUME`) once the shell is whole again. This type is that
+/// state machine without the level: the glue writes [`formed`](Self::formed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CokeOven {
+    /// Stored FE.
+    pub energy: i32,
+    /// EU the active run has used.
+    pub used_eu: i64,
+    /// EU the active run costs in all.
+    pub recipe_energy: i64,
+    /// EU a tick the active run takes now.
+    pub recipe_max_eu: i64,
+    /// The active recipe's id.
+    pub active: Option<&'static str>,
+    /// Whether the shell matched at the last check.
+    pub formed: bool,
+    /// The members that were wrong or missing at the last check.
+    pub missing: u8,
+}
+
+impl CokeOven {
+    /// The oven a saved compound describes; a recipe the table no longer holds
+    /// resets the run, as upstream resets `usedEnergy` for a lost recipe.
+    pub fn from_saved(saved: &OvenSaved) -> Self {
+        let active = saved.active.filter(|id| coke_recipe(id).is_some());
+        let (used_eu, recipe_energy, recipe_max_eu) = match active {
+            Some(_) => (
+                saved.used_eu.max(0),
+                saved.recipe_energy.max(0),
+                saved.recipe_max_eu.max(0),
+            ),
+            None => (0, 0, 0),
+        };
+        Self {
+            energy: saved.energy.clamp(0, COKE_CAPACITY_FE),
+            used_eu,
+            recipe_energy,
+            recipe_max_eu,
+            active,
+            formed: saved.formed,
+            missing: saved.missing.min(COKE_OVEN_SHELL.len() as u8),
+        }
+    }
+
+    /// What to save.
+    pub fn saved(&self) -> OvenSaved {
+        OvenSaved {
+            energy: self.energy,
+            used_eu: self.used_eu,
+            recipe_energy: self.recipe_energy,
+            recipe_max_eu: self.recipe_max_eu,
+            active: self.active,
+            formed: self.formed,
+            missing: self.missing,
+        }
+    }
+
+    /// Takes up to `amount` FE into the buffer, answering how many it took.
+    pub fn insert_fe(&mut self, amount: i32) -> i32 {
+        let taken = amount.clamp(0, COKE_CAPACITY_FE - self.energy);
+        self.energy += taken;
+        taken
+    }
+
+    /// What the info command prints.
+    pub fn status(&self) -> OvenStatus {
+        let progress = if self.recipe_energy > 0 {
+            (self.used_eu * 1_000 / self.recipe_energy).clamp(0, 1_000)
+        } else {
+            0
+        };
+        OvenStatus {
+            energy: self.energy,
+            recipe_max_eu: self.recipe_max_eu,
+            active: self.active,
+            formed: self.formed,
+            missing: self.missing,
+            progress_permille: u16::try_from(progress).unwrap_or(0),
+        }
+    }
+
+    /// One server tick of `CrafterComponent` at the steam tier's 2 EU/t.
+    ///
+    /// An unformed oven ticks nothing: the run stays exactly where it was, no
+    /// energy is taken and no input is consumed, which is upstream's
+    /// `NOT_MATCHED` branch.
+    pub fn tick(&mut self, slots: &mut dyn Slots, roll: &mut dyn FnMut() -> u32) -> Tick {
+        if !self.formed {
+            return Tick::default();
+        }
+        let mut started = false;
+
+        // START, or resume the paused run upstream puts in TRYING_TO_RESUME.
+        if self.used_eu == 0 && self.energy >= FE_PER_EU {
+            let resumable = self
+                .active
+                .and_then(coke_recipe)
+                .filter(|found| can_start(found, slots));
+            let found =
+                resumable.or_else(|| COKE_RECIPES.iter().find(|found| can_start(found, slots)));
+            if let Some(found) = found {
+                take_inputs(found, slots);
+                self.active = Some(found.id);
+                self.used_eu = 0;
+                self.recipe_energy = found.total_eu();
+                self.recipe_max_eu = i64::from(COKE_EU);
+                started = true;
+            }
+        }
+
+        // PROCESS.
+        let mut energy_used_eu = 0;
+        let mut crafted = None;
+        if let Some(found) = self.active.and_then(coke_recipe) {
+            self.recipe_max_eu = i64::from(COKE_EU);
+            if self.used_eu > 0 || started {
+                let needed_eu = (self.recipe_energy - self.used_eu)
+                    .max(0)
+                    .min(self.recipe_max_eu);
+                let moved_eu = (needed_eu * i64::from(FE_PER_EU)).min(i64::from(self.energy))
+                    / i64::from(FE_PER_EU);
+                self.energy -= i32::try_from(moved_eu * i64::from(FE_PER_EU)).unwrap_or(0);
+                self.used_eu += moved_eu;
+                energy_used_eu = moved_eu;
+                if self.recipe_energy > 0 && self.used_eu == self.recipe_energy {
+                    apply_outputs(found, slots, roll);
+                    self.used_eu = 0;
+                    crafted = Some(found.id);
+                }
+            }
+        }
+        // The steam oven has no efficiency ticks, so a finished run clears its
+        // recipe at once (`clearActiveRecipeIfPossible` with 0 ticks).
+        if self.used_eu == 0 && crafted.is_some() {
+            self.active = None;
+        }
+
+        Tick {
+            energy_used_eu,
+            crafted,
+            active: energy_used_eu > 0,
+        }
+    }
+}
+
+/// [`COKE_OVEN_ID`]'s entity check, as [`is_macerator`] is for the macerator.
+#[must_use]
+pub fn is_coke_oven(entity_id: &str) -> bool {
+    entity_id == COKE_OVEN_ID
+}
+
+/// The coke oven recipe with this id, if the table holds it.
+pub fn coke_recipe(id: &str) -> Option<&'static MachineRecipe> {
+    COKE_RECIPES.iter().find(|recipe| recipe.id == id)
+}
+
+/// The coke oven recipes this slice carries, from the jar's
+/// `data/modern_industrialization/recipe/materials/coke_oven/`.
+///
+/// Both rows are the jar's own: `coke.json` (1 coal → 1 coke at 2 EU/t for 600
+/// ticks) and `coke_dust.json` (1 `#c:dusts/coal` → 1 coke dust, the tag resolved
+/// to this package's own coal dust). Each jar recipe also names a **fluid**
+/// output — 500 mB of `modern_industrialization:creosote` at 50% — which this
+/// slice does not model: a fluid tank for the mod's own fluid is the gap recorded
+/// in `notes.md`, and dropping a chance output is upstream's own behaviour when a
+/// machine has nowhere to put it.
+pub const COKE_RECIPES: &[MachineRecipe] = &[
+    MachineRecipe {
+        // materials/coke_oven/coke.json
+        id: "modern_industrialization:coke_oven_coal_to_coke",
+        inputs: &[Input {
+            item: "minecraft:coal",
+            amount: 1,
+        }],
+        outputs: &[Output {
+            item: "modern_industrialization:coke",
+            amount: 1,
+            permille: 10000,
+        }],
+        eu: COKE_EU,
+        duration: 600,
+    },
+    MachineRecipe {
+        // materials/coke_oven/coke_dust.json (tag c:dusts/coal)
+        id: "modern_industrialization:coke_oven_coal_dust_to_coke_dust",
+        inputs: &[Input {
+            item: "modern_industrialization:coal_dust",
+            amount: 1,
+        }],
+        outputs: &[Output {
+            item: "modern_industrialization:coke_dust",
+            amount: 1,
+            permille: 10000,
+        }],
+        eu: COKE_EU,
+        duration: 600,
     },
 ];
 
@@ -1363,7 +1805,7 @@ mod tests {
 
     #[test]
     fn a_probability_output_is_rolled() {
-        let seed = MaceratorRecipe {
+        let seed = MachineRecipe {
             id: "test:chanced",
             eu: 2,
             duration: 100,
@@ -1527,5 +1969,304 @@ mod tests {
         assert!(!is_macerator("minecraft:furnace"));
         assert!(!is_macerator("modern_industrialization:steam_boiler"));
         assert!(!is_macerator(""));
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 2: the coke oven multiblock
+    // -----------------------------------------------------------------------
+
+    /// A shell as the game would answer it: absolute position to block id.
+    struct ShellBench {
+        blocks: Vec<([i32; 3], &'static str)>,
+    }
+
+    impl ShellBench {
+        /// The controller at `origin` standing in a complete shell of bricks.
+        fn complete(origin: [i32; 3]) -> Self {
+            Self {
+                blocks: COKE_OVEN_SHELL
+                    .iter()
+                    .map(|member| {
+                        (
+                            [
+                                origin[0] + member.offset[0],
+                                origin[1] + member.offset[1],
+                                origin[2] + member.offset[2],
+                            ],
+                            member.block,
+                        )
+                    })
+                    .collect(),
+            }
+        }
+
+        fn with(mut self, pos: [i32; 3], block: &'static str) -> Self {
+            self.blocks.retain(|(at, _)| *at != pos);
+            self.blocks.push((pos, block));
+            self
+        }
+
+        fn without(mut self, pos: [i32; 3]) -> Self {
+            self.blocks.retain(|(at, _)| *at != pos);
+            self
+        }
+    }
+
+    impl Shell for ShellBench {
+        fn block_at(&self, pos: [i32; 3]) -> Option<&str> {
+            self.blocks
+                .iter()
+                .find(|(at, _)| *at == pos)
+                .map(|(_, block)| *block)
+        }
+    }
+
+    /// The 25 shell positions of a controller at the origin, as the jar's
+    /// `ShapeTemplate` lays them out.
+    fn shelf() -> ShellBench {
+        ShellBench::complete([0, 0, 0])
+    }
+
+    #[test]
+    fn the_coke_oven_shell_is_upstreams_three_by_three_by_three() {
+        assert_eq!(COKE_OVEN_SHELL.len(), 25, "9 + 7 + 9 positions");
+        assert!(
+            COKE_OVEN_SHELL
+                .iter()
+                .all(|m| m.block == "minecraft:bricks")
+        );
+        for (y, want) in [(-1, 9), (0, 7), (1, 9)] {
+            let layer = COKE_OVEN_SHELL.iter().filter(|m| m.offset[1] == y).count();
+            assert_eq!(layer, want, "layer y={y}");
+        }
+        // The controller's own position and the hollow interior are not members.
+        assert!(!COKE_OVEN_SHELL.iter().any(|m| m.offset == [0, 0, 0]));
+        assert!(
+            !COKE_OVEN_SHELL
+                .iter()
+                .any(|m| m.offset == COKE_OVEN_INTERIOR)
+        );
+        // Every position is unique, and the shape is 3 wide and 3 deep.
+        for (index, member) in COKE_OVEN_SHELL.iter().enumerate() {
+            assert!(
+                !COKE_OVEN_SHELL[..index]
+                    .iter()
+                    .any(|other| other.offset == member.offset),
+                "{:?} twice",
+                member.offset
+            );
+            assert!((-1..=1).contains(&member.offset[0]));
+            assert!((0..=2).contains(&member.offset[2]));
+        }
+    }
+
+    #[test]
+    fn a_shell_of_bricks_forms_the_coke_oven() {
+        let matched = match_shell(&shelf(), [0, 0, 0]);
+        assert!(matched.formed, "{matched:?}");
+        assert_eq!(matched.missing, 0);
+    }
+
+    #[test]
+    fn one_missing_brick_leaves_the_coke_oven_unformed() {
+        let matched = match_shell(&shelf().without([1, 1, 2]), [0, 0, 0]);
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1);
+    }
+
+    #[test]
+    fn a_shell_member_of_another_block_does_not_form() {
+        // The macerator is this port's own block and still not the oven's brick.
+        let matched = match_shell(
+            &shelf().with([-1, -1, 0], "modern_industrialization:electric_macerator"),
+            [0, 0, 0],
+        );
+        assert!(!matched.formed);
+        assert_eq!(matched.missing, 1);
+    }
+
+    #[test]
+    fn the_coke_ovens_interior_and_its_controller_are_not_checked() {
+        // Upstream's hollow layer skips (0,0,1) and `build()` removes (0,0,0):
+        // what stands there is the player's business, not the shape's.
+        let mut bench = shelf();
+        bench.blocks.push((COKE_OVEN_INTERIOR, "minecraft:stone"));
+        bench.blocks.push(([0, 0, 0], COKE_OVEN_ID));
+        let matched = match_shell(&bench, [0, 0, 0]);
+        assert!(matched.formed, "{matched:?}");
+    }
+
+    #[test]
+    fn the_match_is_relative_to_the_controller() {
+        let bench = ShellBench::complete([10, 100, -4]);
+        assert!(match_shell(&bench, [10, 100, -4]).formed);
+        assert!(!match_shell(&bench, [0, 0, 0]).formed);
+    }
+
+    #[test]
+    fn only_a_shell_member_or_the_controller_can_change_a_match() {
+        // Reading 25 blocks for every block change in the world is wasteful; a
+        // change of anything else cannot change a coke oven's match.
+        assert!(
+            shell_relevant(COKE_OVEN_BRICK, "minecraft:air"),
+            "a brick goes"
+        );
+        assert!(
+            shell_relevant("minecraft:air", COKE_OVEN_BRICK),
+            "a brick comes"
+        );
+        assert!(
+            shell_relevant(COKE_OVEN_ID, "minecraft:air"),
+            "the controller goes"
+        );
+        assert!(
+            shell_relevant("minecraft:air", COKE_OVEN_ID),
+            "the controller comes"
+        );
+        assert!(!shell_relevant("minecraft:stone", "minecraft:gravel"));
+        assert!(!shell_relevant("minecraft:air", "minecraft:water"));
+    }
+
+    #[test]
+    fn the_carried_coke_recipe_is_the_jars_two_eu_six_hundred_ticks() {
+        let coke = coke_recipe("modern_industrialization:coke_oven_coal_to_coke")
+            .expect("the jar's coke recipe is carried");
+        assert_eq!(coke.eu, 2);
+        assert_eq!(coke.duration, 600);
+        assert_eq!(coke.total_eu(), 1_200, "2 EU/t x 600 ticks");
+        assert_eq!(coke.inputs.len(), 1);
+        assert_eq!(
+            coke.inputs[0],
+            Input {
+                item: "minecraft:coal",
+                amount: 1
+            }
+        );
+        assert_eq!(coke.outputs.len(), 1, "the item half of the recipe");
+        assert_eq!(coke.outputs[0].item, "modern_industrialization:coke");
+        assert_eq!(coke.outputs[0].amount, 1);
+        assert_eq!(coke.outputs[0].permille, PROBABILITY_SCALE);
+        assert_eq!(COKE_RECIPES.len(), 2, "coal and coal dust");
+    }
+
+    #[test]
+    fn an_unformed_coke_oven_does_nothing_and_consumes_nothing() {
+        let mut oven = CokeOven::default();
+        assert!(!oven.formed);
+        oven.insert_fe(20_000);
+        let mut bench = Bench::new(&[("minecraft:coal", 1)]);
+        for _ in 0..600 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(oven.energy, 20_000, "an unformed oven burns nothing");
+        assert_eq!(oven.active, None);
+        assert_eq!(bench.held("minecraft:coal"), 1, "the input is kept");
+        assert_eq!(bench.out("modern_industrialization:coke"), 0);
+        assert_eq!(oven.status().progress_permille, 0);
+    }
+
+    #[test]
+    fn a_formed_coke_oven_makes_one_coke_for_exactly_twelve_thousand_fe() {
+        let mut oven = CokeOven {
+            formed: true,
+            ..Default::default()
+        };
+        oven.insert_fe(20_000);
+        let mut bench = Bench::new(&[("minecraft:coal", 1)]);
+        for _ in 0..600 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(bench.held("minecraft:coal"), 0, "the coal was consumed");
+        assert_eq!(bench.out("modern_industrialization:coke"), 1);
+        assert_eq!(oven.energy, 8_000, "1,200 EU = 12,000 FE exactly");
+        assert_eq!(oven.active, None, "the run is over");
+    }
+
+    #[test]
+    fn the_coke_run_takes_exactly_six_hundred_ticks() {
+        let mut oven = CokeOven {
+            formed: true,
+            ..Default::default()
+        };
+        oven.insert_fe(20_000);
+        let mut bench = Bench::new(&[("minecraft:coal", 1)]);
+        for _ in 0..599 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(
+            bench.out("modern_industrialization:coke"),
+            0,
+            "599 is too few"
+        );
+        assert_eq!(oven.status().progress_permille, 998, "1198 of 1200 EU");
+        assert_eq!(oven.energy, 20_000 - 11_980);
+        oven.tick(&mut bench, &mut always);
+        assert_eq!(bench.out("modern_industrialization:coke"), 1);
+        assert_eq!(oven.energy, 8_000);
+    }
+
+    #[test]
+    fn breaking_a_brick_stops_the_oven_and_reforming_resumes_it() {
+        let mut oven = CokeOven {
+            formed: true,
+            ..Default::default()
+        };
+        oven.insert_fe(20_000);
+        let mut bench = Bench::new(&[("minecraft:coal", 1)]);
+        for _ in 0..100 {
+            oven.tick(&mut bench, &mut always);
+        }
+        let paused_energy = oven.energy;
+        let paused_progress = oven.status().progress_permille;
+        assert!(paused_progress > 0 && paused_progress < 1_000);
+
+        // The shell is broken: the controller is told so by the glue.
+        oven.formed = false;
+        for _ in 0..200 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(oven.energy, paused_energy, "an unformed oven burns nothing");
+        assert_eq!(oven.status().progress_permille, paused_progress);
+        assert_eq!(bench.out("modern_industrialization:coke"), 0);
+
+        // Rebuilt: upstream resumes the run (`TRYING_TO_RESUME`) rather than
+        // starting it again, and the whole run still costs the recipe's energy.
+        oven.formed = true;
+        for _ in 0..500 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(bench.out("modern_industrialization:coke"), 1);
+        assert_eq!(oven.energy, 8_000, "the paused ticks cost nothing");
+    }
+
+    #[test]
+    fn an_oven_without_its_input_starts_nothing() {
+        let mut oven = CokeOven {
+            formed: true,
+            ..Default::default()
+        };
+        oven.insert_fe(20_000);
+        let mut bench = Bench::new(&[]);
+        for _ in 0..40 {
+            oven.tick(&mut bench, &mut always);
+        }
+        assert_eq!(oven.energy, 20_000);
+        assert_eq!(oven.active, None);
+    }
+
+    #[test]
+    fn the_oven_state_survives_a_save_and_a_load() {
+        let mut oven = CokeOven {
+            formed: true,
+            ..Default::default()
+        };
+        oven.insert_fe(20_000);
+        let mut bench = Bench::new(&[("minecraft:coal", 1)]);
+        for _ in 0..300 {
+            oven.tick(&mut bench, &mut always);
+        }
+        let reloaded = CokeOven::from_saved(&oven.saved());
+        assert_eq!(reloaded, oven, "the run, the buffer and formed are saved");
+        assert!(reloaded.formed);
     }
 }

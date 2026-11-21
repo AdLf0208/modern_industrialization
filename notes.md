@@ -320,6 +320,221 @@ stays air, so the check cannot pass vacuously. `PASS`, `EXIT:0`.
   (3.14.9 + zlib-ng vs 3.14.4 + zlib), whose deflate output differs, so the same
   contents hash differently across boxes (verified entry-by-entry equal).
 
+## Slice 2 — the coke oven multiblock (2026-11-21)
+
+**Pin** `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`
+(the campaign pin; `.horizon/sdk` was deleted so the SDK refetched, and `cargo horizon-mod check`
+reports `Made for 0a875da`). Package version **0.2.1**.
+
+**The gap it closes.** "Next slices" #6 below (the multiblocks: controllers, hatches and shape
+matching), which is also the add-on `industrialization_overdrive`'s most blocking parent gap: its
+`tools/parent_surface.py` run names `modern_industrialization:coke_oven` and "multiblock shell
+(ShapeTemplate / SimpleMember / HatchFlags)" ABSENT
+(`ports/_shared/evidence/industrialization_overdrive/parent-surface-matrix.log`). Class `content`,
+tier `deep`; shape `machines`, as `horizon/docs/modpacks.md` asks of a multiblock (a controller
+block entity, its saved state, its container, its energy and a recipe tick).
+
+### The shape and the numbers, read from tag 2.5.12
+
+`MultiblockMachines.cokeOven`:
+
+```java
+SimpleMember bricks = SimpleMember.forBlock(() -> Blocks.BRICKS);
+ShapeTemplate cokeOvenShape = new ShapeTemplate.Builder(MachineCasings.BRICKS)
+        .add3by3Levels(-1, 1, bricks, cokeOvenHatches).build();
+```
+
+- `add3by3Levels(-1, 1, …)` writes the full 3×3 at y=-1, the 3×3 at y=0 with `(0,0,1)` hollow, and
+  the full 3×3 at y=1; `build()` removes `(0,0,0)`. That is **25 members, all `minecraft:bricks`**
+  (9 + 7 + 9): a 3×3×3 box whose front-centre of the middle layer is the controller and which
+  extends two blocks to +z. **The shell is vanilla bricks** because that is the block upstream's own
+  `SimpleMember` names; the mod's own block in this multiblock is the controller. (A 3×3 shell of the
+  mod's *own* machine blocks is the steam blast furnace's shape — `fire_clay_bricks` over 3×3×4 —
+  not the coke oven's. The artefact wins over the brief's wording here, and the e2e still uses one
+  of the mod's own blocks in the shell: the macerator in a gap must *not* form it.)
+- `SteamCraftingMultiblockBlockEntity.getBaseRecipeEu` is `getRecipeEu(steelHatches ? 4 : 2)` and
+  `getMaxRecipeEu` returns the same, so **2 EU/t with no overclock**; `SteamHelper.consumeSteamEu`
+  takes 1 mB of steam per EU.
+- the jar's two recipes under `materials/coke_oven/`: `coke.json` (1 coal → 1 coke, 2 EU/t, 600
+  ticks) and `coke_dust.json` (1 `#c:dusts/coal` → 1 coke dust, the same). Each also names a fluid
+  output — 500 mB of `modern_industrialization:creosote` at 50%, which this slice does not model.
+- `AbstractCraftingMultiblockBlockEntity`: while the shape does not match (`NOT_MATCHED`) the crafter
+  is **not ticked at all**, and a re-match goes to `TRYING_TO_RESUME` and continues the run — so a
+  broken shell pauses a run and rebuilding resumes it, exactly as this port does.
+
+### What was built
+
+| piece | where |
+|---|---|
+| the shell template (`ShellMember`, `COKE_OVEN_SHELL`'s 25 rows) and `match_shell` | `src/runtime.rs` |
+| `shell_relevant`: only a member's or the controller's block can change a match | `src/runtime.rs` |
+| `CokeOven` (buffer, run, `formed`, `missing`) at the steam tier's fixed 2 EU/t | `src/runtime.rs` |
+| `COKE_RECIPES` (2 rows) and `coke_recipe` | `src/runtime.rs` |
+| `MachineRecipe` — `MaceratorRecipe` renamed to upstream's own class name, now that two machines have tables | `src/runtime.rs`, `tools/carry_recipes.py` |
+| the controller's Part (saved data, ticks, one tick, its two slots) | `src/lib.rs` |
+| the match: `block_changed` reads the shell, `level_tick_post` writes `formed`/`shellMissing` | `src/lib.rs` |
+| `info`/`energy` learn the coke oven; `info` prints `formed true|false, missing N` | `src/lib.rs` |
+| the block, the `coke` and `coke_dust` items, models, textures, loot, tags, lang, creative tab | `assets/`, `data/` |
+
+**Two new hooks, both stamped and both present at the previous pin: `block_changed` (v1) and
+`level_tick_post` (v1)** — 10 hooks in all. The match cannot run in a block-entity tick:
+`BlockEntityTickEvent` carries `pos` and the entity and **no level** (slice 1's gap 2). So
+`block_changed` does the reads through a read-only `LevelHost` and `level_tick_post`, which has the
+`ServerHost`, writes the answer with `merge_data`. The cadence is upstream's too — on block updates,
+not every tick.
+
+### The red proof (verbatim, `evidence/modern_industrialization/sdk-test-red-slice2.log`)
+
+`cargo test --offline` with the 14 new tests written and nothing implemented:
+
+```
+error[E0425]: cannot find value `COKE_OVEN_SHELL` in this scope
+error[E0405]: cannot find trait `Shell` in this scope
+error[E0422]: cannot find struct, variant or union type `CokeOven` in this scope
+error[E0425]: cannot find function `shell_relevant` in this scope
+error: could not compile `modern_industrialization` (lib test) due to 37 previous errors
+```
+
+37 errors, exit 101.
+
+### Green
+
+| step | evidence | result |
+|---|---|---|
+| tests | `sdk-test.log` | **41 passed**, 0 failed (27 + 14 new) |
+| lints | `sdk-clippy.log` | exit 0, **0 warnings** |
+| format | `sdk-fmt.log` | `rustfmt --edition 2024 --check` exit 0 |
+| build 1 + 2 | `sdk-build.log`, `sdk-build-2.log` | **byte-identical**, `7308bcf2…` |
+| package | — | **62,560 B**, SHA-256 `7308bcf29c29cabca7def755bb99837a8617ffdb3813c10d4e658fd22dcd5289`, **75 entries**, no packed `Cargo.lock` |
+| check | `sdk-check.log` | exit 0, `modern_industrialization 0.2.1 (native-mod, format native-1/0a875da…/e59da909…, for 26.3)` |
+| fits (the pin) | `sdk-fits.log` | `0a875da  made for`, exit 0 |
+| fits (another build) | `sdk-fits-next.log` | `0b14f8a  fits`, exit 0 |
+| gate | `verify-sdk-package.py` | **1/1** |
+| in game | `evidence/modern_industrialization-e2e/e2e-launcher.log` | **PASS** + `EXIT:0` |
+| control | `e2e-launcher-control.log` | **FAIL** + `EXIT:1` (`expected …electric_macerator at 0,100,0, got 'minecraft:air'`) |
+| fail-capability | `e2e-launcher-selftest.log` | **FAIL** + `EXIT:1` (`SELFTEST flipped: the unformed oven ran nothing and burned nothing, as it should`) |
+| log gate | `check-e2e-logs.py modern_industrialization-e2e --strict` | logs=4 ok=4 |
+
+One `fits` run failed transiently (`fits`: GitHub API `Connection reset by peer`, exit 2) and was
+re-run; the green log is the re-run. The launcher rebuilt the game for this version
+(`Compiling modern_industrialization (1 of 1)`, `native-0a875da-60718813c863`), and that export is
+what the three legs above ran against.
+
+### The in-game leg (quoted from `e2e-launcher.log`, Overworld, controller at 8,101,0)
+
+```
+== A: the coke oven controller alone is unformed and names the 25 missing members ==
+  block(8,101,0) = modern_industrialization:coke_oven
+  slots(8,101,0) = 2
+  oven(8,101,0): modern_industrialization:coke_oven at 8,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed false, missing 25, active none, t=1550
+== B: control — an unformed coke oven runs nothing and burns nothing over 620 ticks ==
+  set_energy(8,101,0) = 20000 FE
+  modern_industrialization:coke_oven at 8,101,0: 20000/32000 FE (2000 EU), progress 0/1000, 0 FE/t, formed false, missing 25, active none, t=2187
+  has(8,101,0) minecraft:coal x1: ok
+  has(8,101,0) modern_industrialization:coke x0: ok
+== C: a 3x3x3 shell of 25 bricks forms it; one coal becomes one coke for exactly 12000 FE ==
+  shell(8,101,0) = 25 bricks
+  oven(8,101,0): modern_industrialization:coke_oven at 8,101,0: 19880/32000 FE (1988 EU), progress 10/1000, 20 FE/t, formed true, missing 0, active modern_industrialization:coke_oven_coal_to_coke, t=2249
+  running: modern_industrialization:coke_oven at 8,101,0: 19100/32000 FE (1910 EU), progress 75/1000, 20 FE/t, formed true, missing 0, active modern_industrialization:coke_oven_coal_to_coke, t=2288
+  has(8,101,0) minecraft:coal x0: ok
+  modern_industrialization:coke_oven at 8,101,0: 8000/32000 FE (800 EU), progress 0/1000, 0 FE/t, formed true, missing 0, active none, t=2920
+  has(8,101,0) modern_industrialization:coke x1: ok
+== C2: the jar's second coke oven recipe (coal dust), and the items the package ships ==
+  block(8,101,0) = modern_industrialization:coke_oven
+  oven(8,101,0): modern_industrialization:coke_oven at 8,101,0: 0/32000 FE (0 EU), progress 0/1000, 0 FE/t, formed true, missing 0, active none, t=2973
+  slots(8,101,0) = 2
+  set_energy(8,101,0) = 20000 FE
+  modern_industrialization:coke_oven at 8,101,0: 8000/32000 FE (800 EU), progress 0/1000, 0 FE/t, formed true, missing 0, active none, t=3609
+  has(8,101,0) modern_industrialization:coke_dust x1: ok
+  give(coke_dust) = {"given":1,"ok":true}
+  give(no_such_item) = {"error":"unknown item modern_industrialization:no_such_item"}
+== D: breaking one brick unforms the oven and freezes the run ==
+  before the break: modern_industrialization:coke_oven at 8,101,0: 18740/32000 FE (1874 EU), progress 105/1000, 20 FE/t, formed true, missing 0, active modern_industrialization:coke_oven_coal_to_coke, t=3747
+  oven(8,101,0): modern_industrialization:coke_oven at 8,101,0: 18420/32000 FE (1842 EU), progress 131/1000, 20 FE/t, formed false, missing 1, active modern_industrialization:coke_oven_coal_to_coke, t=3776
+  after 120 unformed ticks: modern_industrialization:coke_oven at 8,101,0: 18420/32000 FE (1842 EU), progress 131/1000, 20 FE/t, formed false, missing 1, active modern_industrialization:coke_oven_coal_to_coke, t=3912
+  has(8,101,0) modern_industrialization:coke x0: ok
+  a wrong block in the gap does not re-form it (the shell is block-specific)
+  block(9,102,2) = modern_industrialization:electric_macerator
+  oven(8,101,0): modern_industrialization:coke_oven at 8,101,0: 18420/32000 FE (1842 EU), progress 131/1000, 20 FE/t, formed false, missing 1, active modern_industrialization:coke_oven_coal_to_coke, t=3936
+  a brick put back re-forms it and the paused run finishes
+  block(9,102,2) = minecraft:bricks
+  oven(8,101,0): modern_industrialization:coke_oven at 8,101,0: 18140/32000 FE (1814 EU), progress 155/1000, 20 FE/t, formed true, missing 0, active modern_industrialization:coke_oven_coal_to_coke, t=3958
+  resumed: modern_industrialization:coke_oven at 8,101,0: 8000/32000 FE (800 EU), progress 0/1000, 0 FE/t, formed true, missing 0, active none, t=4588
+  has(8,101,0) modern_industrialization:coke x1: ok
+PASS: …
+EXIT:0
+```
+
+What the numbers prove: the shell is matched member by member (25 → 0, and one brick short is
+`missing 1`); the unformed controller burns nothing over the recipe's whole 620 ticks; the formed
+one runs at exactly 20 FE/t (2 EU/t) and one coal costs exactly 12,000 FE (1,200 EU over 600 ticks)
+into one coke; a **player break** of one member flips `formed` to false within the tick the level
+commits it, and the run sits at 131‰ for 120 ticks without spending a FE; a *different* block in the
+gap (this port's own macerator) does not form it, so the template is block-specific; the brick back
+re-forms it and the same run finishes for the recipe's total, 8,000 FE left of 20,000.
+
+### Coverage (every family this slice ships)
+
+| family | state |
+|---|---|
+| the multiblock shell, `formed` and the missing-block readout | **tested** — A (controller alone: `formed false, missing 25`), C (25 bricks: `formed true, missing 0`), C2 (a controller re-placed on a standing shell re-forms it), D (a player break: `formed false, missing 1`; a macerator in the gap: still `missing 1`; the brick back: `formed true, missing 0`) |
+| the jar's coke recipe (1 coal → 1 coke, 2 EU/t, 600 ticks) | **tested** — C: exactly 12,000 FE, 1 coke, the coal consumed; the unit test pins 998‰ at tick 599 |
+| the jar's coke-dust recipe (`#c:dusts/coal` → 1 coke dust) | **tested** — C2: exactly 12,000 FE, 1 coke dust |
+| the unformed controller (the counterfactual) | **tested** — B: 20,000 FE and the coal unchanged over 620 ticks, no product, no progress; `SELFTEST=1` inverts it |
+| pause and resume on a broken/rebuilt shell | **tested** — D: frozen at 131‰ for 120 ticks with no energy, then the same run finishes for the recipe's total |
+| the controller block | **tested** — placed, read back by id, and broken by a player (the self-drop loot table is carried; the drop itself is not asserted) |
+| the `coke` and `coke_dust` items | **tested** — made by the recipes and read back; `ctl give` gives them; an unknown id is refused with `{"error":"unknown item …"}` |
+| the creosote fluid output (500 mB at 50%) | **not ported** — a mod fluid cannot live in a block-entity tank at this pin (`enderstorage`'s measured gap); the item half is carried and the fluid half is dropped, as upstream drops a chance output that has nowhere to go |
+| hatches (item/fluid input/output and the 18 hatchable positions) | **not ported** — the shell is 25 bricks and the controller carries one input and one output slot |
+| the `active` model state, the GUI, the orientation | **not ported** — as slice 1 (no custom loader, no menu, no facing) |
+
+### Deviations this slice introduces
+
+1. **Steam is modelled as FE.** Upstream's steam multiblock stores steam (1 mB = 1 EU) in fluid
+   hatches; this slice stores the same energy as FE at the mod's own 1 EU = 10 FE (32,000 FE for the
+   3,200 EU an LV-equivalent buffer holds). A steam tank is the gap above, not a preference.
+2. **The controller carries the item slots** (one in, one out) instead of hatches, so a run whose
+   product differs from what the output slot holds waits until the slot is empty — the e2e empties
+   it by breaking and re-placing the controller, which a full port would do with a hopper or a
+   second output hatch.
+3. **No orientation:** upstream rotates the shape with the controller's facing; this shape is fixed
+   (the box extends two blocks to +z) because the port has no facing state (slice 1, gap 7).
+4. **No overclock:** the coke oven's only overclock source is steel hatches (4 EU/t), not ported; the
+   rate is the bronze tier's 2 EU/t, as `getBaseRecipeEu` has it.
+5. **`/modern_industrialization info`'s refusal** now reads "That block entity is not one of this
+   port's machines." (it covers two machines); `energy` fills either buffer and `efficiency` stays
+   the macerator's.
+
+### Pin findings for the next slice
+
+- **`BlockEntityTickEvent` still has no level** (slice 1's gap 2). Anything in a block-entity tick
+  that reads the world needs the two-hook split this slice uses: `block_changed` gives
+  `&dyn LevelHost` + `BlockChangedEvent { dimension, pos, old, new }` (reads), `level_tick_post`
+  gives `HostSide::Server(&mut dyn ServerHost)` + `LevelRef` (writes). `LevelHost` has no write at
+  all. `LevelDimension::key().id()` is the dimension key the queue is keyed by.
+- **`block_changed` hears both `/setblock` and a player's `destroyBlock`** (legs A/C/D), so a shape
+  match needs no `break_block` listener.
+- **A block-entity tick's write-back needs a *payload* difference, not just a resized `items`
+  vector.** Slice 1's `data` marker is what makes the reply real: keying materialisation on
+  `items.len()` alone left `ctl container` answering `{"slots":[]}` while the tick left the reply
+  `Changed`. The oven now sets the marker and also checks the length, so a `merge_data` reload that
+  shrinks the vector re-materialises it.
+- **A machine inside its own shell is unreachable by a click** (the same fact `rftoolsbuilder`
+  learned): the e2e breaks the controller from in front of its face (z=-1.5) because from behind the
+  shell's own back wall is what the ray hits, and `ctl break` exits 1 when the ray finds nothing.
+- **`uses.json` records `type:BlockPos built: full`** at the `block_pos` command helper (and `cargo
+  horizon-mod check` prints the same advisory), because the scan
+  resolves the `CommandArgumentValue::BlockPos` *variant* to the SDK type of the same name, while the
+  variant carries `[i32; 3]`. It is the `Recipe` false entry's class (§"Registry fit-gate repair")
+  and harmless here — `BlockPos` is constructible with the same three fields at `0b14f8a`, and
+  `fits --build 0b14f8a` is green.
+- **Upstream observation, not a defect fix:** the guidebook says the coke oven needs a *steam* fluid
+  input hatch to start, while both jar recipes declare no fluid input at all. The port runs the
+  recipes as the data declares them; the guidebook's sentence is upstream's prose, not a rule its
+  data implements.
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
 ## Next slices (in dependency order)
 
 1. **The steam pair** (`bronze_macerator`, `bronze_furnace`) on the same tick: a
@@ -335,8 +550,23 @@ stays air, so the check cannot pass vacuously. `PASS`, `EXIT:0`.
 5. **The electric machines that are the same shape** (furnace, compressor,
    cutting machine, mixer, packer, unpacker, wiremill) — each adds its recipe
    type and slots to the same runtime.
-6. **The multiblocks** (coke oven, blast furnace, distillation tower): controllers,
-   hatches and shape matching, a slice of their own.
+6. ~~**The multiblocks** (coke oven, blast furnace, distillation tower): controllers,
+   hatches and shape matching, a slice of their own.~~ **Partly done (slice 2):** the shell
+   template, the controller, `formed` and the coke oven. What is left, in order:
+   6a. **The hatches** (`bronze_item_input_hatch`, `bronze_item_output_hatch`,
+       `bronze_fluid_input_hatch`, `bronze_fluid_output_hatch`): a block per hatch type that a
+       shell position may hold, its own one-slot container/tank, and the controller aggregating
+       them, so a multiblock takes its input and gives its output through the shell instead of
+       through the controller. This is also what `industrialization_overdrive` needs next after
+       the shape (`HatchTypes`/`HatchBlockEntity` in its parent-surface list).
+   6b. **The steam blast furnace** (`steam_blast_furnace`, the mod's own `fire_clay_bricks`
+       over 3×3×4) on the same machinery, plus `fire_clay_bricks` and its recipe.
+   6c. **A fluid tank for a mod's own fluid** (`modern_industrialization:steam`, `creosote`) —
+       the recorded gap (`Registrar::block_fluids` exists; the harness cannot fill it, and the
+       coke oven's creosote output is the first thing it would carry).
+   6d. **The distillation tower, heat exchanger, vacuum freezer, implosion compressor, fusion
+       reactor** — each a `ShapeTemplate` with pipes and tier data maps (data maps are the tier
+       surface the ledger notes as not yet used by any port).
 
 ## Reviewer repairs (2026-11-11) — PR review items and what changed
 

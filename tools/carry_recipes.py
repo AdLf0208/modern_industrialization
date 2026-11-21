@@ -105,7 +105,7 @@ def rust(jar):
         )
         for position, (item, amount) in enumerate(variants):
             lines.append(
-                "    Recipe {\n"
+                "    MachineRecipe {\n"
                 "        // %s\n"
                 "        id: \"%s\",\n"
                 "        inputs: &[Input { item: \"%s\", amount: %d }],\n"

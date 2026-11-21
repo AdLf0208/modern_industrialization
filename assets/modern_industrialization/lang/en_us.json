@@ -9,5 +9,9 @@
   "item.modern_industrialization.gold_dust": "Gold Dust",
   "item.modern_industrialization.iron_dust": "Iron Dust",
   "item.modern_industrialization.lapis_dust": "Lapis Dust",
-  "item.modern_industrialization.quartz_dust": "Quartz Dust"
+  "item.modern_industrialization.quartz_dust": "Quartz Dust",
+  "block.modern_industrialization.coke_oven": "Coke Oven",
+  "item.modern_industrialization.coke_oven": "Coke Oven",
+  "item.modern_industrialization.coke": "Coke",
+  "item.modern_industrialization.coke_dust": "Coke Dust"
 }

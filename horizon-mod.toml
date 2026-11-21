@@ -1,13 +1,18 @@
 id = "modern_industrialization"
 name = "Modern Industrialization"
-version = "0.2.0"
-description = """A port of Modern Industrialization for Horizon: the electric macerator, the first machine of
-the mod's electric age. The block carries a 32,000 FE buffer, one item input slot and four item output
-slots, and runs upstream's CrafterComponent tick at the LV tier, so a recipe costs eu * duration EU
-and an earned overclock tick speeds it up without making it cheaper. Thirty-three of the jar's own
-macerator recipes are carried, the block and its nine dusts load from this package's own content, and
-/modern_industrialization reports a machine's buffer, progress and efficiency. The other machine
-families, the multiblocks, the generators and the pipes are not ported yet."""
+version = "0.2.1"
+description = """A port of Modern Industrialization for Horizon: the electric macerator and the coke oven,
+the first machine and the first multiblock of the mod's steam and electric ages. The macerator carries
+a 32,000 FE buffer, one item input slot and four item output slots, and runs upstream's
+CrafterComponent tick at the LV tier, so a recipe costs eu * duration EU and an earned overclock tick
+speeds it up without making it cheaper. The coke oven is a 3x3x3 shell of bricks around its
+controller: the controller matches the shell as upstream's ShapeTemplate declares it, reports
+`formed` and how many blocks are missing, and runs the jar's coke recipe (1 coal to 1 coke at 2 EU/t
+for 600 ticks) only while the shell is whole, pausing the run when a brick is broken and resuming it
+when the shell is rebuilt. Thirty-five of the jar's own recipes are carried, the blocks and items load
+from this package's own content, and /modern_industrialization reports a machine's buffer, progress,
+efficiency and shell. The other machine families, the hatches, the generators and the pipes are not
+ported yet."""
 authors = ["Azercoco", "Technici4n", "AdLf0208"]
 # A native mod: Rust in src/, compiled by the launcher against the game build [native] pins, beside
 # the data/ and assets/ of the same package. The id is the resource namespace and the only identity.
@@ -19,5 +24,5 @@ capabilities = ["registries"]
 
 [native]
 game = "26.3"
-horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+horizon = "0a875da91dbb0fdcb7ba8c42c11341aa229af51a"
 mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

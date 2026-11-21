@@ -1,41 +1,44 @@
 #!/usr/bin/env bash
-# In-game check for Modern Industrialization slice 1: the electric macerator.
+# In-game check for Modern Industrialization slice 2: the coke oven multiblock, plus
+# slice 1's electric macerator as the regression.
 #
 # Since the SDK migration (2026-11-18) the mod is one flat `.hmod` that the launcher
 # compiles into the game, so this script needs a game the launcher built with it:
 #
 #   ports/tools/launcher-game.sh build modern_industrialization
 #   eval "$(ports/tools/launcher-game.sh env modern_industrialization)"
-#   build-slot.sh run --job e2e-mi --port ports/modern_industrialization --step e2e \
-#       -- bash ports/modern_industrialization/tools/e2e.sh
+#   build-slot.sh run --job W1-modern_industrialization --port ports/modern_industrialization \
+#       --step e2e -- bash ports/modern_industrialization/tools/e2e.sh
 #
-# The block, its block entity, the recipe table and the commands are inside the
-# same package; there is no `--dev-mod` leg and no `.horizon-cache`. The control is
-# the *same Nightly* without the package (`GAME=$CONTROL_GAME`, everything else
-# identical), where `modern_industrialization:electric_macerator` is an unknown
-# block and the first `setblock` assertion fails.
+# The blocks, their block entities, the recipe tables, the shell and the commands are
+# inside the same package; there is no `--dev-mod` leg and no `.horizon-cache`. The
+# control is the *same Nightly* without the package (`GAME=$CONTROL_GAME`, everything
+# else identical), where `modern_industrialization:coke_oven` is an unknown block and
+# the first `setblock` assertion fails.
 #
-# The machine is one block: 32,000 FE (3,200 EU at the mod's own 1 EU = 10 FE),
-# one item input, four item outputs, and `CrafterComponent`'s tick — 8 EU/t (80
-# FE/t) base, 32 EU/t (320 FE/t) at the overclock cap, `eu * duration` EU a run.
+# The coke oven is upstream's shape, block for block: `ShapeTemplate.Builder(BRICKS)
+# .add3by3Levels(-1, 1, bricks, hatches).build()` is 25 `minecraft:bricks` in a 3x3x3
+# box whose front-centre of the middle layer is the controller, with the interior
+# (0,0,1) hollow and the controller's own position removed. Its recipe is the jar's
+# `materials/coke_oven/coke.json`: 2 EU/t for 600 ticks (1,200 EU = 12,000 FE at the
+# mod's own 1 EU = 10 FE), one coal in, one coke out.
 #
-# Default run (Overworld, stone floor at y=100):
-#  A  a fresh machine exposes its five item slots (one input, four outputs) and
-#     reads 0/32,000 FE, 0 FE/t, progress 0, efficiency 0/0;
-#  B  control "input, no energy": a stone in the slot makes nothing and is kept;
-#  C  control "energy, no input": 10,000 FE stay 10,000 FE for 40 ticks;
-#  D  one stone becomes one cobblestone and the buffer loses exactly 2,000 FE
-#     (200 EU at 8 EU/t: 25 ticks);
-#  E  one iron ore becomes THREE raw iron and the buffer loses exactly 4,000 FE
-#     (400 EU, 200 ticks of recipe time at 2 EU/t — the duration is honoured);
-#  F  at efficiency 72 the machine runs at 320 FE/t: an ancient debris still
-#     costs 1600 EU (16,000 FE) but now in 50 ticks instead of 200;
-#  G  a run in progress survives save + quit + relaunch and finishes there:
-#     a diamond costs exactly 16,000 FE (1600 EU, 800 ticks) whenever it ends,
-#     and the reloaded machine exposes its five slots again.
+# Legs (Overworld, stone floor at y=99, the oven's controller at 8,101,0):
+#  A  the controller alone is `formed false, missing 25` and exposes its two slots;
+#  B  control — an unformed oven runs nothing and burns nothing over 620 ticks, and
+#     keeps the coal in its input slot;
+#  C  a 3x3x3 shell of 25 bricks forms it: `formed true, missing 0`, the run reports
+#     20 FE/t, and one coal becomes exactly one coke for exactly 12,000 FE in 600
+#     ticks (the coal is consumed at the start, the coke appears at the end);
+#  D  breaking one brick flips `formed` to false and freezes the run (no energy, no
+#     progress, no product over 120 ticks); the macerator standing in the gap does not
+#     re-form it (the shell is block-specific); a brick put back re-forms it and the
+#     paused run finishes, still for exactly 12,000 FE in all;
+#  E..K the macerator: the 32,000 FE buffer, the four outputs, the LV overclock, and a
+#     half-finished run surviving save + quit + relaunch.
 #
-# SELFTEST=1 flips B's "no energy, no output" assertion (it must FAIL), proving
-# the scenario can fail.
+# SELFTEST=1 runs only the coke oven legs with the formed assertion inverted (B must
+# FAIL), so the fail-capability is the multiblock's, not the machine's.
 set -Eeuo pipefail
 export LC_ALL=C
 [ -z "${MI_DEBUG:-}" ] || set -x
@@ -51,7 +54,7 @@ SELFTEST=${SELFTEST:-0}
 KEEP=${KEEP:-0}
 WORLD=ModernIndustrializationE2E
 
-# The numbers this run asserts (Modern Industrialization 2.5.12's own).
+# The macerator's numbers (Modern Industrialization 2.5.12's own).
 CAPACITY=32000        # MachineTier.LV.getMaxStoredEu() 3200 EU x 10 FE
 RATE=80               # 8 EU/t x 10
 OVERCLOCK_RATE=320    # 32 EU/t x 10
@@ -60,6 +63,13 @@ IRON_ORE_FE=4000      # 2 EU/t x 200 ticks = 400 EU
 OVERCLOCK_TICKS=72    # the efficiency at which 200 EU reaches 32 EU/t
 DIAMOND_FE=16000      # 2 EU/t x 800 ticks = 1600 EU
 DEBRIS_FE=16000       # 2 EU/t x 800 ticks = 1600 EU (50 ticks at 32 EU/t)
+
+# The coke oven's numbers.
+OVEN_CAPACITY=32000   # the same LV buffer, 3,200 EU x 10
+OVEN_RATE=20          # the steam tier: 2 EU/t x 10
+OVEN_FE=12000         # 2 EU/t x 600 ticks = 1,200 EU
+OVEN_SHELL=25         # 9 + 7 + 9 positions of minecraft:bricks
+COKE_OVEN_AT="8 101 0"
 
 [ -x "$CTL" ] || { echo "missing horizon-ctl: $CTL" >&2; exit 1; }
 [ -n "$GAME" ] || {
@@ -205,7 +215,7 @@ set_energy() { # X Y Z AMOUNT
     fail "could not set $1,$2,$3 to $want FE"
 }
 
-# set_efficiency X Y Z TICKS: the harness control that warms the machine.
+# set_efficiency X Y Z TICKS: the harness control that warms the macerator.
 set_efficiency() { # X Y Z TICKS
     local want=$4 out
     say "modern_industrialization efficiency $want $1 $2 $3"
@@ -225,6 +235,8 @@ progress_of() { sed -nE 's/.*progress ([0-9]+)\/1000.*/\1/p' <<<"$1"; }
 rate_of() { sed -nE 's/.*, ([0-9]+) FE\/t,.*/\1/p' <<<"$1"; }
 efficiency_of() { sed -nE 's/.*efficiency ([0-9]+)\/[0-9]+.*/\1/p' <<<"$1"; }
 active_of() { sed -nE 's/.*active ([^,]*), t=.*/\1/p' <<<"$1"; }
+formed_of() { sed -nE 's/.*formed (true|false).*/\1/p' <<<"$1"; }
+missing_of() { sed -nE 's/.*, missing ([0-9]+),.*/\1/p' <<<"$1"; }
 
 expect_info() { # expect_info X Y Z FIELD WANT
     local line got
@@ -236,142 +248,316 @@ expect_info() { # expect_info X Y Z FIELD WANT
         rate) got=$(rate_of "$line") ;;
         efficiency) got=$(efficiency_of "$line") ;;
         active) got=$(active_of "$line") ;;
+        formed) got=$(formed_of "$line") ;;
+        missing) got=$(missing_of "$line") ;;
         *) fail "unknown field $4" ;;
     esac
     [ "$got" = "$5" ] || fail "expected $4 = $5 at $1,$2,$3, got '$got' ($line)"
 }
 
-expect_not_zero_energy() { # the counterfactual that SELFTEST flips
-    local line energy
+# expect_oven X Y Z FORMED MISSING: the controller's shell answer, parsed.
+expect_oven() { # X Y Z FORMED(true|false) MISSING
+    local line got_formed got_missing
     line=$(info "$1" "$2" "$3")
-    energy=$(energy_of "$line")
+    echo "  oven($1,$2,$3): $line"
+    got_formed=$(formed_of "$line")
+    got_missing=$(missing_of "$line")
+    [ "$got_formed" = "$4" ] || fail "expected formed $4 at $1,$2,$3, got '$got_formed' ($line)"
+    [ "$got_missing" = "$5" ] || fail "expected missing $5 at $1,$2,$3, got '$got_missing' ($line)"
+}
+
+# build_shell X Y Z: the 25 bricks of upstream's coke oven shape around a controller
+# at X,Y,Z, skipping the controller's own position and the hollow interior (0,0,1).
+build_shell() { # X Y Z
+    local x=$1 y=$2 z=$3 built=0 dx dy dz
+    for dy in -1 0 1; do
+        for dx in -1 0 1; do
+            for dz in 0 1 2; do
+                if [ "$dx" = 0 ] && [ "$dy" = 0 ] && [ "$dz" != 2 ]; then
+                    continue   # the controller (0,0,0) and the interior (0,0,1)
+                fi
+                ctl command "setblock $((x + dx)) $((y + dy)) $((z + dz)) minecraft:bricks" >/dev/null
+                built=$((built + 1))
+            done
+        done
+    done
+    ctl wait 4
+    echo "  shell($x,$y,$z) = $built bricks"
+    [ "$built" = "$OVEN_SHELL" ] || fail "the shape built $built members, expected $OVEN_SHELL"
+}
+
+# ---------------------------------------------------------------------------
+# The coke oven multiblock (slice 2)
+# ---------------------------------------------------------------------------
+
+# empty_oven: the controller carries one input and one output slot (the item input and
+# output hatches upstream puts in the shell), so a run whose product differs from what
+# the output slot holds cannot start. A player empties it by breaking the controller and
+# putting it back — which the whole shell still standing re-forms at once, so this is
+# also the "controller placed last on a waiting shell" check. The player stands in front
+# of the controller's face: from behind, the shell's own back wall is what the click hits.
+empty_oven() {
+    local ox oy oz
+    read -r ox oy oz <<<"$COKE_OVEN_AT"
+    ctl command "execute in minecraft:overworld run tp @s $ox.5 $oy -1.5" >/dev/null
+    ctl wait 4
+    ctl break "$ox" "$oy" "$oz" >/dev/null
+    ctl wait 6
+    [ "$(block_name "$ox" "$oy" "$oz")" = "minecraft:air" ] \
+        || fail "the controller did not break: $(block_name "$ox" "$oy" "$oz")"
+    place "$ox" "$oy" "$oz" modern_industrialization:coke_oven
+    expect_oven "$ox" "$oy" "$oz" true 0
+    expect_slots "$ox" "$oy" "$oz" 2
+}
+
+oven_legs() {
+    echo "== A: the coke oven controller alone is unformed and names the 25 missing members =="
+    place $COKE_OVEN_AT modern_industrialization:coke_oven
+    # One input, one output: the hatches are not ported, so the controller carries them.
+    expect_slots $COKE_OVEN_AT 2
+    expect_oven $COKE_OVEN_AT false "$OVEN_SHELL"
+
+    echo "== B: control — an unformed coke oven runs nothing and burns nothing over 620 ticks =="
+    set_energy $COKE_OVEN_AT 20000
+    ctl container $COKE_OVEN_AT minecraft:coal 1 >/dev/null
+    ctl wait 620
+    line=$(info $COKE_OVEN_AT)
     echo "  $line"
     if [ "$SELFTEST" = 1 ]; then
-        echo "  SELFTEST: expecting a machine with no energy to have processed its input (this must fail)"
-        [ "${energy:-0}" -gt 0 ] || fail "SELFTEST flipped: the machine with no energy made nothing, as it should"
+        echo "  SELFTEST: expecting the unformed oven to have burned its coal and made coke (this must fail)"
+        if [ "$(energy_of "$line")" = 20000 ] && [ "$(progress_of "$line")" = 0 ]; then
+            fail "SELFTEST flipped: the unformed oven ran nothing and burned nothing, as it should"
+        fi
     fi
-    [ "${energy:-0}" = 0 ] || fail "a machine with no energy stored FE: $line"
+    [ "$(energy_of "$line")" = 20000 ] || fail "an unformed oven burned energy: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "an unformed oven has progress: $line"
+    [ "$(active_of "$line")" = none ] || fail "an unformed oven started a run: $line"
+    has $COKE_OVEN_AT minecraft:coal 1
+    has $COKE_OVEN_AT modern_industrialization:coke 0
+
+    echo "== C: a 3x3x3 shell of $OVEN_SHELL bricks forms it; one coal becomes one coke for exactly $OVEN_FE FE =="
+    build_shell $COKE_OVEN_AT
+    expect_oven $COKE_OVEN_AT true 0
+    ctl wait 30
+    line=$(info $COKE_OVEN_AT)
+    echo "  running: $line"
+    [ "$(active_of "$line")" = modern_industrialization:coke_oven_coal_to_coke ] \
+        || fail "the formed oven did not start the jar's coke recipe: $line"
+    [ "$(rate_of "$line")" = "$OVEN_RATE" ] \
+        || fail "the steam tier does not report $OVEN_RATE FE/t: $line"
+    progress=$(progress_of "$line")
+    [ "${progress:-0}" -gt 0 ] || fail "the formed oven has no progress: $line"
+    [ "${progress:-1000}" -lt 1000 ] || fail "the formed oven finished in 30 ticks: $line"
+    has $COKE_OVEN_AT minecraft:coal 0
+    ctl wait 620
+    line=$(info $COKE_OVEN_AT)
+    echo "  $line"
+    [ "$(energy_of "$line")" = $((20000 - OVEN_FE)) ] \
+        || fail "the coke run did not cost exactly $OVEN_FE FE: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "the coke run did not finish: $line"
+    [ "$(active_of "$line")" = none ] || fail "the coke run did not end: $line"
+    has $COKE_OVEN_AT modern_industrialization:coke 1
+
+    echo "== C2: the jar's second coke oven recipe (coal dust), and the items the package ships =="
+    # C's coke is in the output slot; the dust run needs it empty.
+    empty_oven
+    set_energy 8 101 0 20000
+    ctl container 8 101 0 modern_industrialization:coal_dust 1 >/dev/null
+    ctl wait 620
+    line=$(info 8 101 0)
+    echo "  $line"
+    [ "$(energy_of "$line")" = $((20000 - OVEN_FE)) ] \
+        || fail "the coal-dust run did not cost exactly $OVEN_FE FE: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "the coal-dust run did not finish: $line"
+    has 8 101 0 modern_industrialization:coke_dust 1
+    known=$(ctl give modern_industrialization:coke_dust 1)
+    echo "  give(coke_dust) = $known"
+    jq -e '.ok == true' <<<"$known" >/dev/null || fail "give coke_dust failed: $known"
+    unknown=$(ctl give modern_industrialization:no_such_item 1 || true)
+    echo "  give(no_such_item) = $unknown"
+    if jq -e '.ok == true' <<<"$unknown" >/dev/null 2>&1; then
+        fail "an unknown item id was accepted: $unknown"
+    fi
+
+    echo "== D: breaking one brick unforms the oven and freezes the run =="
+    # C2's coke dust is in the output slot and this run makes coke: empty it first.
+    empty_oven
+    set_energy $COKE_OVEN_AT 20000
+    ctl container $COKE_OVEN_AT minecraft:coal 1 >/dev/null
+    ctl wait 60
+    running=$(info $COKE_OVEN_AT)
+    echo "  before the break: $running"
+    [ "$(progress_of "$running")" -gt 0 ] || fail "the second run did not start: $running"
+    [ "$(progress_of "$running")" -lt 1000 ] || fail "the second run finished too early: $running"
+    # A real player break (not `/setblock air`): the shell must unform on the same
+    # `Level.setBlock` the block_changed hook hears, whichever way the block went.
+    ctl command "execute in minecraft:overworld run tp @s 8.5 101 4.5" >/dev/null
+    ctl wait 4
+    ctl break 9 102 2 >/dev/null
+    ctl wait 6
+    [ "$(block_name 9 102 2)" = "minecraft:air" ] \
+        || fail "the player break did not remove the brick at 9,102,2: $(block_name 9 102 2)"
+    expect_oven $COKE_OVEN_AT false 1
+    frozen=$(info $COKE_OVEN_AT)
+    frozen_energy=$(energy_of "$frozen")
+    frozen_progress=$(progress_of "$frozen")
+    ctl wait 120
+    line=$(info $COKE_OVEN_AT)
+    echo "  after 120 unformed ticks: $line"
+    [ "$(energy_of "$line")" = "$frozen_energy" ] \
+        || fail "an unformed oven kept burning energy: $line"
+    [ "$(progress_of "$line")" = "$frozen_progress" ] \
+        || fail "an unformed oven kept making progress: $line"
+    has $COKE_OVEN_AT modern_industrialization:coke 0
+    echo "  a wrong block in the gap does not re-form it (the shell is block-specific)"
+    place 9 102 2 modern_industrialization:electric_macerator
+    ctl wait 6
+    expect_oven $COKE_OVEN_AT false 1
+    echo "  a brick put back re-forms it and the paused run finishes"
+    place 9 102 2 minecraft:bricks
+    ctl wait 6
+    expect_oven $COKE_OVEN_AT true 0
+    ctl wait 620
+    line=$(info $COKE_OVEN_AT)
+    echo "  resumed: $line"
+    [ "$(energy_of "$line")" = $((20000 - OVEN_FE)) ] \
+        || fail "the paused ticks cost nothing, so the whole run is $OVEN_FE FE: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "the resumed run did not finish: $line"
+    has $COKE_OVEN_AT modern_industrialization:coke 1
+}
+
+# ---------------------------------------------------------------------------
+# The electric macerator (slice 1, the regression)
+# ---------------------------------------------------------------------------
+
+macerator_legs() {
+    echo "== E: a fresh machine is empty and idle =="
+    place 0 100 0 modern_industrialization:electric_macerator
+    # The declared container (one input, four outputs) must be visible to the
+    # engine on the very first tick, not only once something has changed.
+    expect_slots 0 100 0 5
+    line=$(info 0 100 0)
+    echo "  $line"
+    [ "$(energy_of "$line")" = 0 ] || fail "a fresh machine stored FE: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "a fresh machine has progress: $line"
+    [ "$(rate_of "$line")" = 0 ] || fail "a fresh machine reports a rate: $line"
+    [ "$(efficiency_of "$line")" = 0 ] || fail "a fresh machine is warm: $line"
+    [ "$(active_of "$line")" = none ] || fail "a fresh machine has a recipe: $line"
+    case "$line" in
+        *"/$CAPACITY FE"*) ;;
+        *) fail "the buffer is not $CAPACITY FE: $line" ;;
+    esac
+
+    echo "== F: control — input, no energy, nothing happens =="
+    place 0 100 4 modern_industrialization:electric_macerator
+    ctl container 0 100 4 minecraft:stone 1 >/dev/null
+    ctl wait 40
+    line=$(info 0 100 4)
+    echo "  $line"
+    [ "$(active_of "$line")" = none ] || fail "a machine with no energy started a run: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "a machine with no energy has progress: $line"
+    [ "$(energy_of "$line")" = 0 ] || fail "a machine with no energy stored FE: $line"
+    has 0 100 4 minecraft:stone 1
+
+    echo "== G: control — energy, no input, nothing happens =="
+    place 4 100 0 modern_industrialization:electric_macerator
+    set_energy 4 100 0 10000
+    ctl wait 40
+    expect_info 4 100 0 energy 10000
+    expect_info 4 100 0 active none
+
+    echo "== H: one stone becomes one cobblestone for exactly $STONE_FE FE =="
+    set_energy 0 100 0 10000
+    ctl container 0 100 0 minecraft:stone 1 >/dev/null
+    ctl wait 40
+    line=$(info 0 100 0)
+    echo "  $line"
+    [ "$(energy_of "$line")" = $((10000 - STONE_FE)) ] \
+        || fail "the stone run did not cost exactly $STONE_FE FE: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "the stone run did not finish: $line"
+    has 0 100 0 minecraft:cobblestone 1
+
+    echo "== I: one iron ore becomes three raw iron for exactly $IRON_ORE_FE FE =="
+    ctl container 0 100 0 minecraft:iron_ore 1 >/dev/null
+    ctl wait 70
+    line=$(info 0 100 0)
+    echo "  $line"
+    [ "$(energy_of "$line")" = $((10000 - STONE_FE - IRON_ORE_FE)) ] \
+        || fail "the iron-ore run did not cost exactly $IRON_ORE_FE FE: $line"
+    has 0 100 0 minecraft:raw_iron 3
+    has 0 100 0 minecraft:cobblestone 1
+
+    echo "== J: at efficiency $OVERCLOCK_TICKS the machine runs at $OVERCLOCK_RATE FE/t =="
+    # An ancient debris is 800 ticks at 2 EU/t (1600 EU = 16,000 FE), so it is still
+    # running when the rate is read, and 1600 EU at 32 EU/t is 50 ticks.
+    set_efficiency 0 100 0 $OVERCLOCK_TICKS
+    expect_info 0 100 0 efficiency $OVERCLOCK_TICKS
+    set_energy 0 100 0 20000
+    ctl container 0 100 0 minecraft:ancient_debris 1 >/dev/null
+    ctl wait 3
+    line=$(info 0 100 0)
+    echo "  $line"
+    [ "$(rate_of "$line")" = $OVERCLOCK_RATE ] \
+        || fail "the overclocked machine does not report $OVERCLOCK_RATE FE/t: $line"
+    [ "$(progress_of "$line")" -gt 0 ] || fail "the overclocked run did not start: $line"
+    ctl wait 70
+    line=$(info 0 100 0)
+    echo "  $line"
+    [ "$(energy_of "$line")" = $((20000 - DEBRIS_FE)) ] \
+        || fail "the overclocked run did not cost exactly $DEBRIS_FE FE: $line"
+    [ "$(progress_of "$line")" = 0 ] || fail "the overclocked run did not finish: $line"
+    has 0 100 0 minecraft:netherite_scrap 2
+
+    echo "== K: a run in progress survives save, quit and relaunch =="
+    # A diamond is 800 ticks of recipe time at 2 EU/t (1600 EU = 16,000 FE), long
+    # enough that the save and the relaunch cannot finish it.
+    set_efficiency 0 100 0 0
+    set_energy 0 100 0 20000
+    ctl container 0 100 0 minecraft:diamond 1 >/dev/null
+    ctl wait 20
+    before=$(info 0 100 0)
+    echo "  before save: $before"
+    before_progress=$(progress_of "$before")
+    before_energy=$(energy_of "$before")
+    [ "${before_progress:-0}" -gt 0 ] || fail "the run did not start: $before"
+    [ "${before_progress:-0}" -lt 1000 ] || fail "the run finished before the save: $before"
+    [ "${before_energy:-0}" -lt 20000 ] || fail "the run spent no energy: $before"
+    ctl save | sed 's/^/  /'
+    stop_game
+    launch "$WORLD"
+    ctl command "execute in minecraft:overworld run tp @s 0.5 100 3.5" >/dev/null
+    ctl wait 40 >/dev/null
+    # A reloaded machine gets its five slots back too (the saved list keeps only
+    # the occupied ones, so the first tick after the load has to grow it again).
+    expect_slots 0 100 0 5
+    after=$(info 0 100 0)
+    echo "  after relaunch: $after"
+    [ "$(progress_of "$after")" -gt 0 ] || fail "the saved run was lost: $after"
+    [ "$(progress_of "$after")" -lt 1000 ] || fail "the saved run finished during the relaunch: $after"
+    [ "$(active_of "$after")" = "modern_industrialization:diamond_to_diamond_dust" ] \
+        || fail "the saved recipe was lost: $after"
+    ctl wait 850
+    final=$(info 0 100 0)
+    echo "  resumed to: $final"
+    [ "$(energy_of "$final")" = $((20000 - DIAMOND_FE)) ] \
+        || fail "the resumed run did not cost exactly $DIAMOND_FE FE: $final"
+    [ "$(progress_of "$final")" = 0 ] || fail "the resumed run did not finish: $final"
+    has 0 100 0 modern_industrialization:diamond_dust 1
 }
 
 echo "== launch (Overworld arena at y=100, the launcher-built game carrying the package) =="
 launch
 arena
 
-echo "== A: a fresh machine is empty and idle =="
-place 0 100 0 modern_industrialization:electric_macerator
-# The declared container (one input, four outputs) must be visible to the
-# engine on the very first tick, not only once something has changed.
-expect_slots 0 100 0 5
-line=$(info 0 100 0)
-echo "  $line"
-[ "$(energy_of "$line")" = 0 ] || fail "a fresh machine stored FE: $line"
-[ "$(progress_of "$line")" = 0 ] || fail "a fresh machine has progress: $line"
-[ "$(rate_of "$line")" = 0 ] || fail "a fresh machine reports a rate: $line"
-[ "$(efficiency_of "$line")" = 0 ] || fail "a fresh machine is warm: $line"
-[ "$(active_of "$line")" = none ] || fail "a fresh machine has a recipe: $line"
-case "$line" in
-    *"/$CAPACITY FE"*) ;;
-    *) fail "the buffer is not $CAPACITY FE: $line" ;;
-esac
-
-echo "== B: control — input, no energy, nothing happens =="
-place 0 100 4 modern_industrialization:electric_macerator
-ctl container 0 100 4 minecraft:stone 1 >/dev/null
-ctl wait 40
-line=$(info 0 100 4)
-echo "  $line"
-[ "$(active_of "$line")" = none ] || fail "a machine with no energy started a run: $line"
-[ "$(progress_of "$line")" = 0 ] || fail "a machine with no energy has progress: $line"
-expect_not_zero_energy 0 100 4
-has 0 100 4 minecraft:stone 1
-
-echo "== C: control — energy, no input, nothing happens =="
-place 4 100 0 modern_industrialization:electric_macerator
-set_energy 4 100 0 10000
-ctl wait 40
-expect_info 4 100 0 energy 10000
-expect_info 4 100 0 active none
-
-echo "== D: one stone becomes one cobblestone for exactly $STONE_FE FE =="
-set_energy 0 100 0 10000
-ctl container 0 100 0 minecraft:stone 1 >/dev/null
-ctl wait 40
-line=$(info 0 100 0)
-echo "  $line"
-[ "$(energy_of "$line")" = $((10000 - STONE_FE)) ] \
-    || fail "the stone run did not cost exactly $STONE_FE FE: $line"
-[ "$(progress_of "$line")" = 0 ] || fail "the stone run did not finish: $line"
-has 0 100 0 minecraft:cobblestone 1
-
-echo "== E: one iron ore becomes three raw iron for exactly $IRON_ORE_FE FE =="
-ctl container 0 100 0 minecraft:iron_ore 1 >/dev/null
-ctl wait 70
-line=$(info 0 100 0)
-echo "  $line"
-[ "$(energy_of "$line")" = $((10000 - STONE_FE - IRON_ORE_FE)) ] \
-    || fail "the iron-ore run did not cost exactly $IRON_ORE_FE FE: $line"
-has 0 100 0 minecraft:raw_iron 3
-has 0 100 0 minecraft:cobblestone 1
-
-echo "== F: at efficiency $OVERCLOCK_TICKS the machine runs at $OVERCLOCK_RATE FE/t =="
-# An ancient debris is 800 ticks at 2 EU/t (1600 EU = 16,000 FE), so it is still
-# running when the rate is read, and 1600 EU at 32 EU/t is 50 ticks.
-set_efficiency 0 100 0 $OVERCLOCK_TICKS
-expect_info 0 100 0 efficiency $OVERCLOCK_TICKS
-set_energy 0 100 0 20000
-ctl container 0 100 0 minecraft:ancient_debris 1 >/dev/null
-ctl wait 3
-line=$(info 0 100 0)
-echo "  $line"
-[ "$(rate_of "$line")" = $OVERCLOCK_RATE ] \
-    || fail "the overclocked machine does not report $OVERCLOCK_RATE FE/t: $line"
-[ "$(progress_of "$line")" -gt 0 ] || fail "the overclocked run did not start: $line"
-ctl wait 70
-line=$(info 0 100 0)
-echo "  $line"
-[ "$(energy_of "$line")" = $((20000 - DEBRIS_FE)) ] \
-    || fail "the overclocked run did not cost exactly $DEBRIS_FE FE: $line"
-[ "$(progress_of "$line")" = 0 ] || fail "the overclocked run did not finish: $line"
-has 0 100 0 minecraft:netherite_scrap 2
-
-echo "== G: a run in progress survives save, quit and relaunch =="
-# A diamond is 800 ticks of recipe time at 2 EU/t (1600 EU = 16,000 FE), long
-# enough that the save and the relaunch cannot finish it.
-set_efficiency 0 100 0 0
-set_energy 0 100 0 20000
-ctl container 0 100 0 minecraft:diamond 1 >/dev/null
-ctl wait 20
-before=$(info 0 100 0)
-echo "  before save: $before"
-before_progress=$(progress_of "$before")
-before_energy=$(energy_of "$before")
-[ "${before_progress:-0}" -gt 0 ] || fail "the run did not start: $before"
-[ "${before_progress:-0}" -lt 1000 ] || fail "the run finished before the save: $before"
-[ "${before_energy:-0}" -lt 20000 ] || fail "the run spent no energy: $before"
-ctl save | sed 's/^/  /'
-stop_game
-launch "$WORLD"
-ctl command "execute in minecraft:overworld run tp @s 0.5 100 3.5" >/dev/null
-ctl wait 40 >/dev/null
-# A reloaded machine gets its five slots back too (the saved list keeps only
-# the occupied ones, so the first tick after the load has to grow it again).
-expect_slots 0 100 0 5
-after=$(info 0 100 0)
-echo "  after relaunch: $after"
-[ "$(progress_of "$after")" -gt 0 ] || fail "the saved run was lost: $after"
-[ "$(progress_of "$after")" -lt 1000 ] || fail "the saved run finished during the relaunch: $after"
-[ "$(active_of "$after")" = "modern_industrialization:diamond_to_diamond_dust" ] \
-    || fail "the saved recipe was lost: $after"
-ctl wait 850
-final=$(info 0 100 0)
-echo "  resumed to: $final"
-[ "$(energy_of "$final")" = $((20000 - DIAMOND_FE)) ] \
-    || fail "the resumed run did not cost exactly $DIAMOND_FE FE: $final"
-[ "$(progress_of "$final")" = 0 ] || fail "the resumed run did not finish: $final"
-has 0 100 0 modern_industrialization:diamond_dust 1
+if [ "$SELFTEST" = 1 ]; then
+    echo "== SELFTEST: the macerator legs are skipped; the coke oven's formed assertion runs inverted =="
+else
+    macerator_legs
+fi
+oven_legs
 
 if [ "$SELFTEST" = 1 ]; then
     echo "SELFTEST finished without failing (this is a bug in the test)"
     exit 1
 fi
-echo "PASS: the electric macerator holds 32,000 FE (3,200 EU), takes one input and gives up to four outputs, runs a stone at $RATE FE/t for exactly $STONE_FE FE (200 EU) into one cobblestone, an iron ore for exactly $IRON_ORE_FE FE (400 EU) into three raw iron, reaches $OVERCLOCK_RATE FE/t at efficiency $OVERCLOCK_TICKS while an ancient debris still costs 1600 EU (16,000 FE), makes nothing without energy and burns nothing without an input, and a half-finished run survives save and relaunch; one .hmod carries both the block and the behaviour"
+echo "PASS: the coke oven is a 3x3x3 shell of 25 bricks around its controller: unformed it runs nothing and burns nothing, formed it reports 20 FE/t and one coal becomes one coke for exactly 12,000 FE (1,200 EU in 600 ticks), breaking one brick flips formed to false and freezes the run, a macerator in the gap does not re-form it, and a brick put back resumes the run for the recipe's own energy; the electric macerator still holds 32,000 FE (3,200 EU), runs a stone at $RATE FE/t for exactly $STONE_FE FE into one cobblestone, an iron ore for $IRON_ORE_FE FE into three raw iron, reaches $OVERCLOCK_RATE FE/t at efficiency $OVERCLOCK_TICKS while an ancient debris still costs 1600 EU (16,000 FE), makes nothing without energy and burns nothing without an input, and a half-finished run survives save and relaunch; one .hmod carries the blocks, the data and the behaviour"

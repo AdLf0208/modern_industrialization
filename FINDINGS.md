@@ -116,3 +116,67 @@ is the real-world case that would use it.
 | a custom GUI with a progress bar, an energy bar, an efficiency bar, a slot panel, side configuration and auto-extract | no menu; the container is the automation path and `/modern_industrialization info` is the readout | `ModContainer` has no per-slot `may_place` for a player's menu at this pin, so a hopper menu would let a player fill the output slots |
 | a machine model drawn by the `modern_industrialization:machine` model loader (casing + overlays composited, `active` state) | a plain model: the `basic_machine_hull` casing and the macerator's front/top overlays as thin outer quads, no `active` state | a content pack cannot run a custom model loader, and the machine has no orientation/active block state to switch |
 | breaking the machine drops it with its contents in components | a self-drop loot table; the buffer and inventory are lost | the pin has no block-item component carry for a mod block entity |
+
+## Slice 2: the coke oven multiblock
+
+Read from tag `2.5.12` (`MultiblockMachines.cokeOven`, `ShapeTemplate.java`,
+`SteamCraftingMultiblockBlockEntity.java`, `AbstractCraftingMultiblockBlockEntity.java`,
+`SteamHelper.java`, `MachineCasings.java`) and from the jar's
+`data/modern_industrialization/recipe/materials/coke_oven/`.
+
+### The shape
+
+```java
+SimpleMember bricks = SimpleMember.forBlock(() -> Blocks.BRICKS);
+ShapeTemplate cokeOvenShape = new ShapeTemplate.Builder(MachineCasings.BRICKS)
+        .add3by3Levels(-1, 1, bricks, cokeOvenHatches).build();
+```
+
+| Where | What it says |
+|---|---|
+| `ShapeTemplate.Builder.add3by3Levels(minY, maxY, …)` | `add3by3(y, member, hollow = y != minY, flags)` for each layer, so y=-1 and y=1 are full 3×3 (and hatchable) while y=0 is hollow at `(0,0,1)` |
+| `ShapeTemplate.Builder.add3by3(y, member, hollow, flags)` | `x` -1..=1, `z` 0..=2, skipping `(0, 0, 1)` when hollow |
+| `ShapeTemplate.Builder.build()` | `remove(0, 0, 0)` — the controller's own position is not a member |
+| the result | 9 + 7 + 9 = **25 members, all `minecraft:bricks`**: a 3×3×3 box, controller at the front-centre of the middle layer, interior `(0,0,1)` unchecked, extending two blocks to +z |
+| `MachineCasings.BRICKS` | `createBlockImitation(MI.id("bricks"), () -> Blocks.BRICKS)` — the *vanilla* brick block, so the coke oven's shell is not one of the mod's own machine blocks |
+| the jar's guidebook (`steam_age/coke_oven.md`) | "21 Bricks and 3 Hatches" for the 24 non-controller blocks; it also wants an item input, an item output and a *fluid input* hatch to start |
+| `HatchFlags` of the coke oven | `ITEM_INPUT | ITEM_OUTPUT | FLUID_INPUT | FLUID_OUTPUT` on the 18 positions of the two end layers |
+
+### The machine
+
+| Where | What it says |
+|---|---|
+| `SteamCraftingMultiblockBlockEntity.getBaseRecipeEu` | `overclockComponent.getRecipeEu(steelTier ? 4 : 2)` |
+| `SteamCraftingMultiblockBlockEntity.getMaxRecipeEu` | the same value, so the run's rate is fixed (no overclock without steel hatches) |
+| `SteamCraftingMultiblockBlockEntity` (behavior) | `consumeEu` is `SteamHelper.consumeSteamEu(inventory.getFluidInputs(), max, simulation)` |
+| `SteamHelper.consumeSteamEu` | sums the steam stacks and takes `min(maxEu, amount)` mB: **1 mB of steam is 1 EU** |
+| `SteamCraftingMultiblockBlockEntity.tickExtra` | `overclockComponent.tick(this)` — the only overclock source |
+| `AbstractCraftingMultiblockBlockEntity.tick` | `NOT_MATCHED` → `crafter.decreaseEfficiencyTicks()` and **no crafter tick**; `TRYING_TO_RESUME` → `crafter.tryContinueRecipe()`; `NORMAL_OPERATION` → `crafter.tickRecipe()` |
+| `AbstractCraftingMultiblockBlockEntity.onRematch` | `NOT_MATCHED`, and `TRYING_TO_RESUME` when the shape matched (`inventory.rebuild`) |
+| `CrafterComponent.tryContinueRecipe` | keeps `usedEnergy` and only checks that the finished outputs still fit |
+| `MultiblockMachines.cokeOven` registration | `MachineRegistrationHelper.registerMachine("Coke Oven", "coke_oven", …)` — the block id is `modern_industrialization:coke_oven`, the model casing `bricks`, `active` variants from `overlay_front_active` |
+
+### The recipes (`materials/coke_oven/`)
+
+| File | Input | Output | EU/t | Ticks |
+|---|---|---|---:|---:|
+| `coke.json` | 1 `minecraft:coal` | 1 `modern_industrialization:coke`; **+500 mB `modern_industrialization:creosote` at 50%** | 2 | 600 |
+| `coke_dust.json` | 1 `#c:dusts/coal` | 1 `modern_industrialization:coke_dust`; the same creosote roll | 2 | 600 |
+
+The tag `c:dusts/coal` is `["modern_industrialization:coal_dust"]` in the jar, and
+`c:dusts/coke` is `["modern_industrialization:coke_dust"]`; both are carried.
+
+**Observation, not a defect:** the guidebook says the coke oven needs a *fluid input* (steam) hatch,
+but neither recipe declares a fluid input — only the chanced creosote output. The port runs the
+recipes as the data declares them.
+
+### Where the rewrite differs
+
+| Upstream | This port | Why |
+|---|---|---|
+| steam in fluid hatches, 1 mB = 1 EU | FE in the controller's buffer, 1 EU = 10 FE | the pin keeps no mod fluid in a block-entity tank (`enderstorage`'s measured gap) |
+| item/fluid hatches in the shell | one input and one output slot on the controller | the hatch model is the next slice (`notes.md` 6a) |
+| the shape rotates with the controller's facing | the shape is fixed, extending two blocks to +z | no facing state (slice 1, gap 7) |
+| `ShapeMatcher` rematches on block updates and caches | `block_changed` re-reads the 25 members of every controller the changed position can belong to | one write per change, no cached matcher to invalidate |
+| steel hatches overclock to 4 EU/t | 2 EU/t always | hatches not ported |
+| the GUI shows `Shape Valid` and the missing blocks on a wrench | `/modern_industrialization info` prints `formed true|false, missing N` | no menu |
